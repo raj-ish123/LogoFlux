@@ -1,0 +1,12 @@
+# render.yaml  –  Render Blueprint (one-click deploy)
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: logoflux
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: FLASK_ENV
+        value: production
