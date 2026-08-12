@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# Temp / debug output files
+logoswap_ui_*/
+_debug_*/
+*.tmp
+tmp/
+
+# Debug / test scripts (internal use only)
+_debug_onset.py
+_test_onset.py
+_test_onset2.py
+_debug_detect.py
+_read_recording.py
+_find_onset.py
+_measure_icon.py
+_extract_transition.py
+_inspect_outputs.py
+_probe.py
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Output videos / images (don't commit large binaries)
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+output/
+processed/
