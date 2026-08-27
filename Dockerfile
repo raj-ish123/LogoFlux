@@ -1,7 +1,7 @@
 # ── Base image ────────────────────────────────────────────────────────────────
 FROM python:3.11-slim
 
-# ── System deps: ffmpeg + build tools for opencv ──────────────────────────────
+# ── System deps: ffmpeg + OpenCV runtime libs ─────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         libgl1 \
@@ -13,14 +13,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ── App code ──────────────────────────────────────────────────────────────────
-COPY logoswap/     ./logoswap/
-COPY logoswap_app.py .
+# ── App code (everything not excluded by .dockerignore) ───────────────────────
+COPY . .
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
-# Render sets $PORT; gunicorn binds to it.
-# 1 worker because video processing is CPU-heavy; 300 s timeout for long renders.
-ENV PORT=10000
-EXPOSE 10000
+# CAP injects $PORT at runtime. 1 worker + long timeout for video processing.
+ENV PORT=8000
+EXPOSE 8000
 
-CMD gunicorn --bind "0.0.0.0:$PORT" --timeout 300 --workers 1 logoswap_app:app
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT} --timeout 300 --workers 1 logoswap_app:app"]
