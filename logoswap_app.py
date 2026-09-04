@@ -20,14 +20,14 @@ from __future__ import annotations
 
 import json
 import logging
-import queue
+import os
 import tempfile
 import threading
 import uuid
 from pathlib import Path
 from typing import Optional
 
-from flask import Flask, Response, jsonify, request
+from flask import Blueprint, Flask, jsonify, request
 
 # ── Embedded HTML ─────────────────────────────────────────────────────────────
 _HTML = r"""<!DOCTYPE html>
@@ -487,6 +487,11 @@ section-title, h2 {
 'use strict';
 const S = { videos: [], logo: null, jobId: null, cards: {} };
 
+function apiUrl(path) {
+  const base = (typeof window !== 'undefined' && window.__APP_BASE_PATH__) || '';
+  return base + path;
+}
+
 function getOptions() {
   return {
     margin:        parseFloat(document.getElementById('margin-range').value),
@@ -531,7 +536,7 @@ function setupDropZone(zoneId, inputId, multiple, onFiles) {
 async function uploadFiles(files) {
   const fd = new FormData();
   files.forEach(f => fd.append('files', f));
-  const res = await fetch('/upload', { method: 'POST', body: fd });
+  const res = await fetch(apiUrl('/upload'), { method: 'POST', body: fd });
   if (!res.ok) throw new Error('Upload failed: ' + res.status);
   return res.json();
 }
@@ -604,7 +609,7 @@ async function runJob() {
   S.videos.forEach((v, i) => addVideoCard(v.name, i));
 
   try {
-    const res = await fetch('/run', {
+    const res = await fetch(apiUrl('/run'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ logo_id: S.logo.id, video_ids: S.videos.map(v => v.id), options: getOptions() }),
@@ -612,7 +617,7 @@ async function runJob() {
     const data = await res.json();
     if (!res.ok) { alert('Error: ' + (data.error || res.status)); resetRunBtn(); return; }
     S.jobId = data.job_id;
-    connectSSE(data.job_id);
+    pollJob(data.job_id);
   } catch(e) { alert('Network error: ' + e.message); resetRunBtn(); }
 }
 
@@ -622,10 +627,28 @@ function resetRunBtn() {
   btn.querySelector('.btn-text').textContent = '▶ \u00a0Run logoswap';
 }
 
-function connectSSE(jobId) {
-  const es = new EventSource('/stream/' + jobId);
-  es.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch(_) {} };
-  es.onerror = () => { es.close(); resetRunBtn(); };
+function pollJob(jobId) {
+  let cursor = 0;
+  let finished = false;
+  const tick = async () => {
+    if (finished) return;
+    try {
+      const res = await fetch(apiUrl('/poll/' + jobId + '?since=' + cursor));
+      if (res.ok) {
+        const data = await res.json();
+        cursor = data.next;
+        (data.events || []).forEach(handleMsg);
+        if (data.status === 'done') {
+          finished = true;
+          resetRunBtn();
+          showResults(data.results);
+          return;
+        }
+      }
+    } catch (_) { /* transient network error — keep polling */ }
+    setTimeout(tick, 800);
+  };
+  tick();
 }
 
 function handleMsg(msg) {
@@ -736,10 +759,10 @@ function showResults(results) {
       card.innerHTML = `<div class="result-icon">❌</div><div class="result-info"><div class="result-name">${esc(r.video)}</div><div class="result-sub">${esc(r.error||'Failed')}</div></div><button class="btn-dl btn-error" disabled>Failed</button>`;
     } else if (r.is_preview) {
       card.classList.add('preview-card');
-      card.innerHTML = `<div class="result-icon">🔍</div><div class="result-info"><div class="result-name">${esc(r.video)}</div><div class="result-sub">Detection preview</div></div><img class="result-img" src="/download/${S.jobId}/${esc(r.output)}" alt="preview"><a class="btn-dl btn-view" href="/download/${S.jobId}/${esc(r.output)}" download="${esc(r.output)}">⬇ Download preview</a>`;
+      card.innerHTML = `<div class="result-icon">🔍</div><div class="result-info"><div class="result-name">${esc(r.video)}</div><div class="result-sub">Detection preview</div></div><img class="result-img" src="${apiUrl('/download/' + S.jobId + '/' + r.output)}" alt="preview"><a class="btn-dl btn-view" href="${apiUrl('/download/' + S.jobId + '/' + r.output)}" download="${esc(r.output)}">⬇ Download preview</a>`;
     } else {
-      const cs = r.contact_sheet ? `<a class="btn-dl btn-cs" href="/download/${S.jobId}/${esc(r.contact_sheet)}" download="${esc(r.contact_sheet)}">📋 Contact sheet</a>` : '';
-      card.innerHTML = `<div class="result-icon">🎉</div><div class="result-info"><div class="result-name">${esc(r.output)}</div><div class="result-sub">Rendered successfully</div></div><a class="btn-dl" href="/download/${S.jobId}/${esc(r.output)}" download="${esc(r.output)}">⬇ Download video</a>${cs}`;
+      const cs = r.contact_sheet ? `<a class="btn-dl btn-cs" href="${apiUrl('/download/' + S.jobId + '/' + r.contact_sheet)}" download="${esc(r.contact_sheet)}">📋 Contact sheet</a>` : '';
+      card.innerHTML = `<div class="result-icon">🎉</div><div class="result-info"><div class="result-name">${esc(r.output)}</div><div class="result-sub">Rendered successfully</div></div><a class="btn-dl" href="${apiUrl('/download/' + S.jobId + '/' + r.output)}" download="${esc(r.output)}">⬇ Download video</a>${cs}`;
     }
     grid.appendChild(card);
   });
@@ -759,23 +782,43 @@ setupDropZone('logo-zone',   'logo-input',   false, handleLogoFile);
 
 # ── Flask app ─────────────────────────────────────────────────────────────────
 
+_BASE_PATH = os.environ.get("APP_BASE_PATH", "").rstrip("/")
+
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 600 * 1024 * 1024
 
 WORK_DIR = Path(tempfile.mkdtemp(prefix="logoswap_ui_"))
 _jobs: dict[str, dict] = {}
 _lock = threading.Lock()
+bp = Blueprint("logoswap", __name__)
 
 
-class _QueueHandler(logging.Handler):
-    def __init__(self, job_q: queue.Queue) -> None:
+def _index_html() -> str:
+    return _HTML.replace(
+        "<head>",
+        f"<head><script>window.__APP_BASE_PATH__={json.dumps(_BASE_PATH)};</script>",
+        1,
+    )
+
+
+def _emit(job_id: str, event: dict) -> None:
+    """Append a progress/log event to the job's event log (read via /poll)."""
+    job = _jobs.get(job_id)
+    if job is not None:
+        job["events"].append(event)
+
+
+class _ListHandler(logging.Handler):
+    """Logging handler that appends log records to a job's event list."""
+
+    def __init__(self, job_id: str) -> None:
         super().__init__()
-        self.job_q = job_q
+        self.job_id = job_id
         self.video_name = ""
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            self.job_q.put_nowait({
+            _emit(self.job_id, {
                 "type": "log",
                 "video": self.video_name,
                 "level": record.levelname,
@@ -785,12 +828,12 @@ class _QueueHandler(logging.Handler):
             pass
 
 
-@app.route("/")
+@bp.route("/")
 def index():
-    return _HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
+    return _index_html(), 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
-@app.route("/upload", methods=["POST"])
+@bp.route("/upload", methods=["POST"])
 def upload():
     saved = []
     for f in request.files.getlist("files"):
@@ -805,7 +848,7 @@ def upload():
     return jsonify(saved)
 
 
-@app.route("/run", methods=["POST"])
+@bp.route("/run", methods=["POST"])
 def start_job():
     data = request.get_json(force=True)
 
@@ -821,46 +864,40 @@ def start_job():
     output_dir = WORK_DIR / job_id / "output"
     output_dir.mkdir(parents=True)
 
-    q: queue.Queue = queue.Queue()
     with _lock:
-        _jobs[job_id] = {"status": "running", "queue": q, "results": [], "output_dir": str(output_dir)}
+        _jobs[job_id] = {"status": "running", "events": [], "results": [], "output_dir": str(output_dir)}
 
     threading.Thread(
         target=_run_job,
-        args=(job_id, logo, videos, output_dir, data.get("options", {}), q),
+        args=(job_id, logo, videos, output_dir, data.get("options", {})),
         daemon=True,
     ).start()
 
     return jsonify({"job_id": job_id})
 
 
-@app.route("/stream/<job_id>")
-def stream(job_id: str):
-    if job_id not in _jobs:
-        return Response(
-            "data: " + json.dumps({"type": "error", "message": "Job not found"}) + "\n\n",
-            mimetype="text/event-stream",
-        )
-    q = _jobs[job_id]["queue"]
+@bp.route("/poll/<job_id>")
+def poll(job_id: str):
+    """Return job events accumulated since ?since=<n>, plus current status.
 
-    def generate():
-        while True:
-            try:
-                msg = q.get(timeout=25)
-                yield f"data: {json.dumps(msg)}\n\n"
-                if msg.get("type") == "job_done":
-                    break
-            except queue.Empty:
-                yield ": keepalive\n\n"
+    Uses plain HTTP polling instead of SSE so it works reliably behind
+    proxies / Kubernetes ingress (CAP) that buffer streaming responses.
+    """
+    job = _jobs.get(job_id)
+    if job is None:
+        return jsonify({"error": "Job not found"}), 404
 
-    return Response(
-        generate(),
-        mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    since = request.args.get("since", default=0, type=int)
+    events = job["events"][since:]
+    return jsonify({
+        "events": events,
+        "next": since + len(events),
+        "status": job["status"],
+        "results": job["results"] if job["status"] == "done" else [],
+    })
 
 
-@app.route("/download/<job_id>/<filename>")
+@bp.route("/download/<job_id>/<filename>")
 def download(job_id: str, filename: str):
     if job_id not in _jobs:
         return "Job not found", 404
@@ -872,7 +909,7 @@ def download(job_id: str, filename: str):
     return send_file(str(path), as_attachment=as_attach)
 
 
-def _run_job(job_id, logo, videos, output_dir, options, q):
+def _run_job(job_id, logo, videos, output_dir, options):
     import argparse
     from logoswap.__main__ import _process_one
 
@@ -889,7 +926,7 @@ def _run_job(job_id, logo, videos, output_dir, options, q):
         verbose=False,
     )
 
-    handler = _QueueHandler(q)
+    handler = _ListHandler(job_id)
     handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%H:%M:%S"))
     ls_log = logging.getLogger("logoswap")
     ls_log.addHandler(handler)
@@ -903,12 +940,12 @@ def _run_job(job_id, logo, videos, output_dir, options, q):
             vpath = Path(entry["path"])
             handler.video_name = vname
 
-            q.put_nowait({"type": "video_start", "video": vname, "index": i, "total": len(videos)})
+            _emit(job_id, {"type": "video_start", "video": vname, "index": i, "total": len(videos)})
 
             try:
                 out = _process_one(vpath, logo_path, output_dir, ns, logo_path.stem)
             except Exception as exc:
-                q.put_nowait({"type": "video_error", "video": vname, "error": str(exc)})
+                _emit(job_id, {"type": "video_error", "video": vname, "error": str(exc)})
                 results.append({"video": vname, "ok": False, "error": str(exc)})
                 continue
 
@@ -918,25 +955,24 @@ def _run_job(job_id, logo, videos, output_dir, options, q):
                 if ns.contact_sheet and cs.is_file():
                     r["contact_sheet"] = cs.name
                 results.append(r)
-                q.put_nowait({"type": "video_done", **r})
+                _emit(job_id, {"type": "video_done", **r})
             elif ns.preview:
                 detect_png = output_dir / f"{vpath.stem}_detect.png"
                 if detect_png.is_file():
                     r = {"video": vname, "output": detect_png.name, "ok": True, "is_preview": True}
                     results.append(r)
-                    q.put_nowait({"type": "video_done", **r})
+                    _emit(job_id, {"type": "video_done", **r})
                 else:
                     results.append({"video": vname, "ok": False})
-                    q.put_nowait({"type": "video_error", "video": vname, "error": "Preview image not generated"})
+                    _emit(job_id, {"type": "video_error", "video": vname, "error": "Preview image not generated"})
             else:
                 results.append({"video": vname, "ok": False})
-                q.put_nowait({"type": "video_error", "video": vname, "error": "Processing returned no output"})
+                _emit(job_id, {"type": "video_error", "video": vname, "error": "Processing returned no output"})
     finally:
         ls_log.removeHandler(handler)
         with _lock:
-            _jobs[job_id]["status"] = "done"
             _jobs[job_id]["results"] = results
-        q.put_nowait({"type": "job_done", "results": results, "job_id": job_id})
+            _jobs[job_id]["status"] = "done"
 
 
 def _find_upload(file_id: str) -> Optional[dict]:
@@ -964,6 +1000,9 @@ def _to_float(v) -> Optional[float]:
         return float(v)
     except (ValueError, TypeError):
         return None
+
+
+app.register_blueprint(bp, url_prefix=_BASE_PATH)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
