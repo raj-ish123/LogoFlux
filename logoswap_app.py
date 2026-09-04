@@ -680,8 +680,10 @@ const STAGES = [
   { re: /Slide-from-top/,               pct: 54,  stage: 'Checking animation type…' },
   { re: /Pop tracking (OK|FALLBACK)/,   pct: 66,  stage: 'Animation tracked' },
   { re: /Logo:.*px/,                    pct: 71,  stage: 'Logo prepared' },
-  { re: /Rendering \(animated/,         pct: 82,  stage: 'Rendering…' },
-  { re: /Rendering \(static/,           pct: 82,  stage: 'Rendering…' },
+  { re: /Rendering \(animated/,         pct: 78,  stage: 'Rendering…' },
+  { re: /Rendering \(static/,           pct: 78,  stage: 'Rendering…' },
+  { re: /Encoding .*preset/,            pct: 85,  stage: 'Encoding video…' },
+  { re: /Encoded .* in /,               pct: 96,  stage: 'Encoded' },
   { re: /Done →/,                       pct: 100, stage: 'Complete!' },
   { re: /FAILED/,                       pct: 100, stage: 'Failed' },
 ];

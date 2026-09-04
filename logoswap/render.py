@@ -16,11 +16,39 @@ Where:
 """
 from __future__ import annotations
 
+import logging
+import os
 import subprocess
+import time
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
+
+log = logging.getLogger("logoswap.render")
+
+# ---------------------------------------------------------------------------
+# Encoder settings (tunable via environment for constrained servers)
+# ---------------------------------------------------------------------------
+# `-preset slow` is far too slow on a single-vCPU container (e.g. CAP free
+# tier): a 60 s 1080x1920 encode can take 30+ minutes.  Default to a fast
+# preset — for flat marketing videos the quality difference at the same CRF
+# is negligible, but it is 10-20x faster.  Override with env vars if needed.
+_X264_PRESET = os.environ.get("LOGOSWAP_X264_PRESET", "veryfast")
+_X264_CRF = os.environ.get("LOGOSWAP_X264_CRF", "20")
+
+
+def _run_ffmpeg(cmd: list, output_path: Path) -> None:
+    """Run an ffmpeg command, logging start + elapsed time, raising on error."""
+    log.info(f"Encoding {output_path.name} (preset={_X264_PRESET}, crf={_X264_CRF})…")
+    t0 = time.time()
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg encode failed for {output_path.name}:\n"
+            f"{result.stderr.decode(errors='replace')[-2500:]}"
+        )
+    log.info(f"Encoded {output_path.name} in {time.time() - t0:.1f}s")
 
 
 # ---------------------------------------------------------------------------
@@ -167,18 +195,14 @@ def render_video(
 
     cmd += [
         "-c:v", "libx264",
-        "-crf", "18",
-        "-preset", "slow",
+        "-crf", _X264_CRF,
+        "-preset", _X264_PRESET,
+        "-threads", "0",
         "-pix_fmt", "yuv420p",
         str(output_path),
     ]
 
-    result = subprocess.run(cmd, capture_output=True)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"ffmpeg encode failed for {output_path.name}:\n"
-            f"{result.stderr.decode(errors='replace')[-2500:]}"
-        )
+    _run_ffmpeg(cmd, output_path)
 
 
 # ---------------------------------------------------------------------------
@@ -256,18 +280,14 @@ def render_slide_in(
 
     cmd += [
         "-c:v", "libx264",
-        "-crf", "18",
-        "-preset", "slow",
+        "-crf", _X264_CRF,
+        "-preset", _X264_PRESET,
+        "-threads", "0",
         "-pix_fmt", "yuv420p",
         str(output_path),
     ]
 
-    result = subprocess.run(cmd, capture_output=True)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"ffmpeg encode failed for {output_path.name}:\n"
-            f"{result.stderr.decode(errors='replace')[-2500:]}"
-        )
+    _run_ffmpeg(cmd, output_path)
 
 
 # ---------------------------------------------------------------------------
@@ -314,18 +334,14 @@ def render_simple(
 
     cmd += [
         "-c:v", "libx264",
-        "-crf", "18",
-        "-preset", "slow",
+        "-crf", _X264_CRF,
+        "-preset", _X264_PRESET,
+        "-threads", "0",
         "-pix_fmt", "yuv420p",
         str(output_path),
     ]
 
-    result = subprocess.run(cmd, capture_output=True)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"ffmpeg encode failed for {output_path.name}:\n"
-            f"{result.stderr.decode(errors='replace')[-2500:]}"
-        )
+    _run_ffmpeg(cmd, output_path)
 
 
 # ---------------------------------------------------------------------------
