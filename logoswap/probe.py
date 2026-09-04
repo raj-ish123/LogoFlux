@@ -63,7 +63,66 @@ def probe_video(path: str | Path) -> dict:
         "height": int(video_stream["height"]),
         "duration": float(data["format"]["duration"]),
         "has_audio": audio_stream is not None,
+        "vcodec": video_stream.get("codec_name"),
+        "acodec": audio_stream.get("codec_name") if audio_stream else None,
     }
+
+
+def stream_codecs(path: str | Path) -> tuple[str | None, str | None]:
+    """Return (video_codec_name, audio_codec_name|None) via ffprobe."""
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-show_entries", "stream=codec_type,codec_name",
+        "-of", "json", str(path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        return (None, None)
+    data = json.loads(result.stdout or "{}")
+    vcodec = acodec = None
+    for s in data.get("streams", []):
+        if s.get("codec_type") == "video" and vcodec is None:
+            vcodec = s.get("codec_name")
+        elif s.get("codec_type") == "audio" and acodec is None:
+            acodec = s.get("codec_name")
+    return (vcodec, acodec)
+
+
+def find_keyframe_before(path: str | Path, t: float) -> float | None:
+    """
+    Return the largest video keyframe presentation time <= t, or None.
+
+    Reads packet flags only (no decode), so it is fast even for long videos.
+    Used to pick a seam-safe cut point for segmented (tail-only) encoding.
+    """
+    if t is None or t <= 0:
+        return None
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "packet=pts_time,flags",
+        "-of", "csv=print_section=0",
+        str(path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+
+    best: float | None = None
+    for line in result.stdout.splitlines():
+        parts = line.split(",")
+        if len(parts) < 2:
+            continue
+        pts_str, flags = parts[0], parts[1]
+        if "K" not in flags:          # not a keyframe packet
+            continue
+        try:
+            pts = float(pts_str)
+        except ValueError:            # pts_time can be "N/A"
+            continue
+        if pts <= t and (best is None or pts > best):
+            best = pts
+    return best
 
 
 # ---------------------------------------------------------------------------

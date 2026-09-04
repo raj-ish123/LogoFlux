@@ -53,6 +53,140 @@ def _run_ffmpeg(cmd: list, output_path: Path) -> None:
     log.info(f"Encoded {output_path.name} in {time.time() - t0:.1f}s")
 
 
+def _run_plain(cmd: list, what: str) -> None:
+    """Run an ffmpeg helper command (no encode logging), raising on error."""
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg {what} failed:\n{result.stderr.decode(errors='replace')[-2000:]}"
+        )
+
+
+def _x264_args() -> list:
+    return [
+        "-c:v", "libx264",
+        "-crf", _X264_CRF,
+        "-preset", _X264_PRESET,
+        "-threads", "0",
+        "-pix_fmt", "yuv420p",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Encode orchestration: full re-encode  vs  tail-only (copy head + concat)
+# ---------------------------------------------------------------------------
+# The logo only ever appears near the END of the video (the end-card), so
+# re-encoding the whole clip is wasteful.  When the source is h264 (+ aac
+# audio) we copy the untouched head with stream-copy and re-encode only the
+# short tail that contains the overlay, then concatenate them via MPEG-TS
+# (seam-safe for h264).  Falls back to a full encode whenever segmentation is
+# not clearly safe.  Disable with LOGOSWAP_FAST_CONCAT=0.
+
+_FAST_CONCAT = os.environ.get("LOGOSWAP_FAST_CONCAT", "1") not in ("0", "false", "False")
+_TAIL_MARGIN = 0.5   # start the re-encoded tail this many seconds before overlay
+_MIN_HEAD = 5.0      # only segment if the copied head is at least this long
+
+
+def _seg_cut(video_path, overlay_start: float, has_audio: bool) -> float | None:
+    """Return a seam-safe keyframe cut time for tail-only encoding, or None."""
+    if not _FAST_CONCAT or overlay_start is None:
+        return None
+    try:
+        from .probe import find_keyframe_before, stream_codecs
+        vcodec, acodec = stream_codecs(video_path)
+        if vcodec != "h264":
+            return None
+        if has_audio and acodec != "aac":
+            return None
+        cut = find_keyframe_before(video_path, overlay_start - _TAIL_MARGIN)
+        if cut is None or cut < _MIN_HEAD:
+            return None
+        return cut
+    except Exception:
+        return None
+
+
+def _render(
+    video_path,
+    output_path: Path,
+    overlay_start: float,
+    has_audio: bool,
+    aux_inputs: list,
+    make_filter,
+) -> None:
+    """
+    Encode the composited video.
+
+    aux_inputs : ffmpeg input args that follow the main video input (image
+                 sequence, logo images) — input indices [1], [2], …
+    make_filter: callable(t0) -> filter_complex string, where every absolute
+                 time reference is shifted by t0 (used when the tail is seeked
+                 with -ss so its timeline starts at 0).
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cut = _seg_cut(video_path, overlay_start, has_audio)
+    if cut is not None:
+        try:
+            _render_tail_concat(video_path, output_path, cut, has_audio, aux_inputs, make_filter)
+            return
+        except Exception as exc:
+            log.warning(f"Tail-segment encode failed ({exc}); using full encode.")
+
+    _render_full(video_path, output_path, has_audio, aux_inputs, make_filter)
+
+
+def _render_full(video_path, output_path: Path, has_audio: bool, aux_inputs: list, make_filter) -> None:
+    cmd = ["ffmpeg", "-y", "-i", str(video_path)] + list(aux_inputs)
+    cmd += ["-filter_complex", make_filter(0.0), "-map", "[outv]"]
+    if has_audio:
+        cmd += ["-map", "0:a", "-c:a", "copy"]
+    cmd += _x264_args() + ["-movflags", "+faststart", str(output_path)]
+    _run_ffmpeg(cmd, output_path)
+
+
+def _render_tail_concat(video_path, output_path: Path, cut: float, has_audio: bool, aux_inputs: list, make_filter) -> None:
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="logoswap_seg_") as td:
+        td = Path(td)
+        head_ts = td / "head.ts"
+        tail_ts = td / "tail.ts"
+
+        # Head: stream-copy [0, cut] → MPEG-TS (annexb so it concatenates cleanly)
+        head_cmd = [
+            "ffmpeg", "-y",
+            "-i", str(video_path),
+            "-t", f"{cut:.4f}",
+            "-c", "copy",
+            "-bsf:v", "h264_mp4toannexb",
+            "-f", "mpegts", str(head_ts),
+        ]
+        _run_plain(head_cmd, "head copy")
+
+        # Tail: re-encode [cut, end] with the overlay; timeline shifted by cut.
+        tail_cmd = ["ffmpeg", "-y", "-ss", f"{cut:.4f}", "-i", str(video_path)] + list(aux_inputs)
+        tail_cmd += ["-filter_complex", make_filter(cut), "-map", "[outv]"]
+        if has_audio:
+            tail_cmd += ["-map", "0:a", "-c:a", "aac", "-b:a", "192k"]
+        tail_cmd += _x264_args() + ["-bsf:v", "h264_mp4toannexb", "-f", "mpegts", str(tail_ts)]
+        _run_ffmpeg(tail_cmd, output_path)
+
+        # Concat head + tail (both h264/aac in TS) → final mp4
+        concat_cmd = [
+            "ffmpeg", "-y",
+            "-i", f"concat:{head_ts}|{tail_ts}",
+            "-c", "copy",
+            "-avoid_negative_ts", "make_zero",
+        ]
+        if has_audio:
+            concat_cmd += ["-bsf:a", "aac_adtstoasc"]
+        concat_cmd += ["-movflags", "+faststart", str(output_path)]
+        _run_plain(concat_cmd, "concat")
+        log.info(f"Tail-only encode: copied head [0,{cut:.2f}s], re-encoded tail → {output_path.name}")
+
+
 # ---------------------------------------------------------------------------
 # Sequence generation
 # ---------------------------------------------------------------------------
@@ -148,63 +282,41 @@ def render_video(
     f0000 = seq_dir / "f0000.png"
 
     if has_preroll and f0000.exists():
-        # 4-input filter:
-        #   [0] video  [1] anim sequence  [2] static settled logo  [3] f0000 pre-roll
-        # Phase timeline:
-        #   [early, ts)  → overlay f0000 (pre-roll at starting scale)
-        #   [ts, tset]   → overlay animation sequence
-        #   (tset, ∞)    → overlay static full-size logo
-        filter_complex = (
-            f"[2:v]scale={logo_size}:{logo_size}[stat];"
-            f"[1:v]setpts=PTS+{ts:.3f}/TB[anim];"
-            f"[0:v][3:v]overlay=0:0:enable='between(t,{early:.3f},{ts:.3f})'[pre];"
-            f"[pre][anim]overlay=0:0:enable='between(t,{ts:.3f},{tset:.3f})'[a];"
-            f"[a][stat]overlay={ox}:{oy}:enable='gte(t,{tset:.3f})'[outv]"
-        )
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(video_path),
+        aux_inputs = [
             "-framerate", fps_frac, "-start_number", "0",
             "-i", str(seq_dir / "f%04d.png"),
             "-i", str(logo_rgba_path),
             "-i", str(f0000),
-            "-filter_complex", filter_complex,
-            "-map", "[outv]",
         ]
+
+        def make_filter(t0: float) -> str:
+            # All absolute times shifted by t0 (0 for full encode, cut for tail).
+            e, s, se = early - t0, ts - t0, tset - t0
+            return (
+                f"[2:v]scale={logo_size}:{logo_size}[stat];"
+                f"[1:v]setpts=PTS+{s:.3f}/TB[anim];"
+                f"[0:v][3:v]overlay=0:0:enable='between(t,{e:.3f},{s:.3f})'[pre];"
+                f"[pre][anim]overlay=0:0:enable='between(t,{s:.3f},{se:.3f})'[a];"
+                f"[a][stat]overlay={ox}:{oy}:enable='gte(t,{se:.3f})'[outv]"
+            )
     else:
-        # No pre-roll (or f0000 missing): original 3-input path
-        static_enable = (
-            f"gte(t,{early:.3f})*(1-between(t,{ts:.3f},{tset:.3f}))"
-        )
-        filter_complex = (
-            f"[2:v]scale={logo_size}:{logo_size}[stat];"
-            f"[1:v]setpts=PTS+{ts:.3f}/TB[anim];"
-            f"[0:v][stat]overlay={ox}:{oy}:enable='{static_enable}'[a];"
-            f"[a][anim]overlay=0:0:enable='between(t,{ts:.3f},{tset:.3f})'[outv]"
-        )
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(video_path),
+        aux_inputs = [
             "-framerate", fps_frac, "-start_number", "0",
             "-i", str(seq_dir / "f%04d.png"),
             "-i", str(logo_rgba_path),
-            "-filter_complex", filter_complex,
-            "-map", "[outv]",
         ]
 
-    if has_audio:
-        cmd += ["-map", "0:a", "-c:a", "copy"]
+        def make_filter(t0: float) -> str:
+            e, s, se = early - t0, ts - t0, tset - t0
+            static_enable = f"gte(t,{e:.3f})*(1-between(t,{s:.3f},{se:.3f}))"
+            return (
+                f"[2:v]scale={logo_size}:{logo_size}[stat];"
+                f"[1:v]setpts=PTS+{s:.3f}/TB[anim];"
+                f"[0:v][stat]overlay={ox}:{oy}:enable='{static_enable}'[a];"
+                f"[a][anim]overlay=0:0:enable='between(t,{s:.3f},{se:.3f})'[outv]"
+            )
 
-    cmd += [
-        "-c:v", "libx264",
-        "-crf", _X264_CRF,
-        "-preset", _X264_PRESET,
-        "-threads", "0",
-        "-pix_fmt", "yuv420p",
-        str(output_path),
-    ]
-
-    _run_ffmpeg(cmd, output_path)
+    _render(video_path, output_path, early, has_audio, aux_inputs, make_filter)
 
 
 # ---------------------------------------------------------------------------
@@ -252,44 +364,27 @@ def render_slide_in(
     _start_oy = int(start_oy) if start_oy is not None else -logo_size
     slide_dist = final_oy - _start_oy      # total travel in pixels
 
-    # Linear slide that exactly tracks the whole-scene scroll velocity.
-    # Using linear (not ease-out) ensures the replacement always sits at the
-    # same y as the original icon — the original is never exposed anywhere.
-    #
-    #   progress = clip((t - onset) / dur, 0, 1)
-    #   y        = _start_oy + slide_dist * progress
-    #            = final_oy - slide_dist * (1 - progress)
-    y_expr = (
-        f"{final_oy}-{slide_dist:.1f}*(1-clip((t-{onset_time:.4f})/{dur:.4f},0,1))"
-    )
+    aux_inputs = ["-i", str(logo_rgba_path)]
 
-    filter_complex = (
-        f"[1:v]scale={logo_size}:{logo_size}[logo];"
-        f"[0:v][logo]overlay={final_ox}:y='{y_expr}':"
-        f"enable='gte(t,{onset_time:.4f})'[outv]"
-    )
+    def make_filter(t0: float) -> str:
+        # Linear slide that exactly tracks the whole-scene scroll velocity.
+        # Using linear (not ease-out) ensures the replacement always sits at
+        # the same y as the original icon — the original is never exposed.
+        #
+        #   progress = clip((t - onset) / dur, 0, 1)
+        #   y        = _start_oy + slide_dist * progress
+        #            = final_oy - slide_dist * (1 - progress)
+        onset = onset_time - t0
+        y_expr = (
+            f"{final_oy}-{slide_dist:.1f}*(1-clip((t-{onset:.4f})/{dur:.4f},0,1))"
+        )
+        return (
+            f"[1:v]scale={logo_size}:{logo_size}[logo];"
+            f"[0:v][logo]overlay={final_ox}:y='{y_expr}':"
+            f"enable='gte(t,{onset:.4f})'[outv]"
+        )
 
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", str(video_path),
-        "-i", str(logo_rgba_path),
-        "-filter_complex", filter_complex,
-        "-map", "[outv]",
-    ]
-
-    if has_audio:
-        cmd += ["-map", "0:a", "-c:a", "copy"]
-
-    cmd += [
-        "-c:v", "libx264",
-        "-crf", _X264_CRF,
-        "-preset", _X264_PRESET,
-        "-threads", "0",
-        "-pix_fmt", "yuv420p",
-        str(output_path),
-    ]
-
-    _run_ffmpeg(cmd, output_path)
+    _render(video_path, output_path, onset_time, has_audio, aux_inputs, make_filter)
 
 
 # ---------------------------------------------------------------------------
@@ -318,32 +413,16 @@ def render_simple(
     ox = round(cx - logo_size / 2)
     oy = round(cy - logo_size / 2)
 
-    filter_complex = (
-        f"[1:v]scale={logo_size}:{logo_size}[logo];"
-        f"[0:v][logo]overlay={ox}:{oy}:enable='gte(t,{onset_time:.3f})'[outv]"
-    )
+    aux_inputs = ["-i", str(logo_rgba_path)]
 
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", str(video_path),
-        "-i", str(logo_rgba_path),
-        "-filter_complex", filter_complex,
-        "-map", "[outv]",
-    ]
+    def make_filter(t0: float) -> str:
+        onset = onset_time - t0
+        return (
+            f"[1:v]scale={logo_size}:{logo_size}[logo];"
+            f"[0:v][logo]overlay={ox}:{oy}:enable='gte(t,{onset:.3f})'[outv]"
+        )
 
-    if has_audio:
-        cmd += ["-map", "0:a", "-c:a", "copy"]
-
-    cmd += [
-        "-c:v", "libx264",
-        "-crf", _X264_CRF,
-        "-preset", _X264_PRESET,
-        "-threads", "0",
-        "-pix_fmt", "yuv420p",
-        str(output_path),
-    ]
-
-    _run_ffmpeg(cmd, output_path)
+    _render(video_path, output_path, onset_time, has_audio, aux_inputs, make_filter)
 
 
 # ---------------------------------------------------------------------------
