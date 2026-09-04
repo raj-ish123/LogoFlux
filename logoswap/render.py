@@ -31,11 +31,13 @@ log = logging.getLogger("logoswap.render")
 # Encoder settings (tunable via environment for constrained servers)
 # ---------------------------------------------------------------------------
 # `-preset slow` is far too slow on a single-vCPU container (e.g. CAP free
-# tier): a 60 s 1080x1920 encode can take 30+ minutes.  Default to a fast
-# preset — for flat marketing videos the quality difference at the same CRF
-# is negligible, but it is 10-20x faster.  Override with env vars if needed.
-_X264_PRESET = os.environ.get("LOGOSWAP_X264_PRESET", "veryfast")
-_X264_CRF = os.environ.get("LOGOSWAP_X264_CRF", "20")
+# tier): a 60 s 1080x1920 encode can take 30+ minutes.  Default to the fastest
+# preset — for flat marketing videos the quality difference at the same CRF is
+# negligible, but it is dramatically faster on weak CPUs.  Override with env
+# vars (LOGOSWAP_X264_PRESET / LOGOSWAP_X264_CRF) for higher quality on beefier
+# machines, e.g. PRESET=slow CRF=18.
+_X264_PRESET = os.environ.get("LOGOSWAP_X264_PRESET", "ultrafast")
+_X264_CRF = os.environ.get("LOGOSWAP_X264_CRF", "21")
 
 
 def _run_ffmpeg(cmd: list, output_path: Path) -> None:
