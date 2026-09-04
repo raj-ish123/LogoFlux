@@ -927,8 +927,13 @@ def _run_job(job_id, logo, videos, output_dir, options):
     )
 
     handler = _ListHandler(job_id)
+    handler.setLevel(logging.INFO)
     handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%H:%M:%S"))
     ls_log = logging.getLogger("logoswap")
+    # The web app never runs the CLI's logging.basicConfig(), so the logoswap
+    # logger would default to the root level (WARNING) under gunicorn and drop
+    # all INFO progress logs. Force INFO here so live logs reach the UI.
+    ls_log.setLevel(logging.INFO)
     ls_log.addHandler(handler)
 
     logo_path = Path(logo["path"])
