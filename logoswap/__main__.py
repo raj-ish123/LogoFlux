@@ -123,6 +123,15 @@ Examples
         help="Seconds after the scene cut to scan for pop-in animation (default 2.5).",
     )
     p.add_argument(
+        "--persistent", choices=["auto", "off"], default="auto",
+        help=(
+            "Detect a logo that stays fixed THROUGHOUT the whole video (a corner "
+            "watermark of any shape) and replace it for the entire duration. "
+            "'auto' (default) tries this first and falls back to end-card mode; "
+            "'off' disables it."
+        ),
+    )
+    p.add_argument(
         "--verbose", "-v", action="store_true",
         help="Verbose logging.",
     )
@@ -473,6 +482,52 @@ def _process_one(
 
         with tempfile.TemporaryDirectory(prefix=f"logoswap_{name}_") as _tmp:
             tmp = Path(_tmp)
+
+            # -------------------------------------------------------------- #
+            # 1b. Persistent-logo mode: if a logo is present THROUGHOUT the
+            #     whole video (a fixed corner watermark of any shape), replace
+            #     it for the entire duration instead of only at the end-card.
+            # -------------------------------------------------------------- #
+            persistent_mode = getattr(args, "persistent", "auto")
+            manual_override = (args.region is not None) or (args.start is not None)
+            if persistent_mode != "off" and not manual_override and not args.preview:
+                from .detect import detect_persistent_logo
+
+                log.info(f"[{name}] Checking for a persistent (throughout-video) logo…")
+                persist = detect_persistent_logo(video_path, duration, vw, vh)
+                if persist is not None:
+                    log.info(
+                        f"[{name}] Persistent logo found: center=({persist.cx},{persist.cy}) "
+                        f"{persist.w}x{persist.h}  conf={persist.confidence:.2f} "
+                        f"→ replacing across the whole video"
+                    )
+                    cover = max(persist.w, persist.h)
+                    logo_rgba, logo_size = build_rounded_logo(
+                        logo_path,
+                        corner_ratio=persist.corner_ratio,
+                        settled_size=cover,
+                        margin=args.margin,
+                    )
+                    logo_rgba_path = tmp / "logo_rgba.png"
+                    save_rounded_logo(logo_rgba, logo_rgba_path)
+
+                    out_name = _safe_output_name(name, logo_stem, output_dir)
+                    output_path = output_dir / out_name
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    log.info(
+                        f"[{name}] Rendering (persistent overlay, {logo_size}px, "
+                        f"full video) → {out_name}"
+                    )
+                    render_simple(
+                        video_path, output_path,
+                        logo_rgba_path, logo_size,
+                        persist.cx, persist.cy,
+                        0.0, has_audio,
+                    )
+                    size_kb = output_path.stat().st_size // 1024
+                    log.info(f"[{name}] Done → {output_path}  ({size_kb} KB)")
+                    return output_path
+                log.info(f"[{name}] No persistent logo; using end-card detection.")
 
             # -------------------------------------------------------------- #
             # 2. Get settled frame (last frame – icon guaranteed present)

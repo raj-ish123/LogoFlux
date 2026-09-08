@@ -32,6 +32,137 @@ class IconRegion:
     confidence: float     # detection confidence 0-1
 
 
+@dataclass
+class PersistentLogo:
+    """A logo/watermark that stays fixed throughout the whole video."""
+    cx: int               # bbox center x (full-res px)
+    cy: int               # bbox center y (full-res px)
+    w: int                # bbox width  (full-res px)
+    h: int                # bbox height (full-res px)
+    corner_ratio: float   # corner_radius / size for the replacement logo
+    confidence: float     # 0-1
+
+
+# ---------------------------------------------------------------------------
+# Persistent-logo detection (logo present THROUGHOUT the video, any shape)
+# ---------------------------------------------------------------------------
+
+def detect_persistent_logo(
+    video_path: str | Path,
+    duration: float,
+    video_w: int,
+    video_h: int,
+    n_samples: int = 20,
+    std_thresh: float = 12.0,
+) -> Optional[PersistentLogo]:
+    """
+    Detect a logo/branding watermark that persists (nearly unchanged) for the
+    entire video by finding a region that is BOTH:
+      * temporally stable  – its pixels barely change across the whole clip
+        (an overlay composited on top of ever-changing footage), and
+      * textured           – it contains real detail/edges (so we ignore flat
+        stable areas such as sky, walls or letterbox bars),
+    and is located near a frame corner (where branding logos live).
+
+    This is completely shape-agnostic: it finds square app-icons, wide text
+    badges, circular emblems, etc.  Returns None when no confident persistent
+    logo is found, so the caller can fall back to end-card detection.
+    """
+    import logging
+    import subprocess
+    log = logging.getLogger("logoswap.detect")
+
+    sw = min(video_w, 384)                       # working width
+    with tempfile.TemporaryDirectory(prefix="logoswap_pl_") as _tmp:
+        tmp = Path(_tmp)
+        frames = []
+        for i in range(n_samples):
+            t = duration * (i + 0.5) / n_samples
+            fp = tmp / f"s{i:02d}.png"
+            cmd = [
+                "ffmpeg", "-y", "-ss", f"{t:.3f}", "-i", str(video_path),
+                "-frames:v", "1", "-vf", f"scale={sw}:-1", str(fp),
+            ]
+            subprocess.run(cmd, capture_output=True)
+            img = cv2.imread(str(fp))
+            if img is not None:
+                frames.append(img)
+
+    if len(frames) < max(6, n_samples // 2):
+        return None
+
+    stack = np.stack(frames).astype(np.float32)   # (N,h,w,3)
+    _, h, w, _ = stack.shape
+    fx = video_w / float(w)
+    fy = video_h / float(h)
+
+    # Temporal std per pixel (avg over colour) – low where an overlay sits.
+    std = stack.std(axis=0).mean(axis=2)
+    stable = (std < std_thresh).astype(np.uint8) * 255
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    stable = cv2.morphologyEx(stable, cv2.MORPH_OPEN, kernel, iterations=1)
+    stable = cv2.morphologyEx(stable, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    # Texture map from the mean (ghost) frame – logos have edges; flat walls don't.
+    meanf = stack.mean(axis=0).astype(np.uint8)
+    gray = cv2.cvtColor(meanf, cv2.COLOR_BGR2GRAY)
+    grad = cv2.magnitude(
+        cv2.Sobel(gray, cv2.CV_32F, 1, 0), cv2.Sobel(gray, cv2.CV_32F, 0, 1)
+    )
+    textured = (grad > 40).astype(np.uint8) * 255
+    textured = cv2.dilate(textured, kernel, iterations=2)
+
+    cand_mask = cv2.bitwise_and(stable, textured)
+    cand_mask = cv2.morphologyEx(cand_mask, cv2.MORPH_CLOSE, kernel, iterations=3)
+
+    contours, _ = cv2.findContours(
+        cand_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+    frame_area = w * h
+    best = None
+    best_conf = 0.0
+    for cnt in contours:
+        x, y, ww, hh = cv2.boundingRect(cnt)
+        area = ww * hh
+        # Floor at ~0.3 % of frame so tiny persistent UI (score/gear icons)
+        # can't be mistaken for a branding logo; cap at 18 %.
+        if area < frame_area * 0.003 or area > frame_area * 0.18:
+            continue
+        # Corner proximity: 0 = exactly in a corner, larger = toward centre.
+        cxr, cyr = (x + ww / 2) / w, (y + hh / 2) / h
+        corner_score = min(cxr, 1 - cxr) + min(cyr, 1 - cyr)
+        if corner_score > 0.38:
+            continue
+        fill = cv2.contourArea(cnt) / max(1.0, area)
+        region_std = float(std[y:y + hh, x:x + ww].mean())
+
+        conf_corner = max(0.0, 1.0 - corner_score / 0.5)
+        conf_stab = max(0.0, 1.0 - region_std / std_thresh)
+        confidence = 0.5 * conf_corner + 0.3 * conf_stab + 0.2 * min(1.0, fill)
+        if confidence > best_conf:
+            best_conf = confidence
+            best = (x, y, ww, hh)
+
+    if best is None or best_conf < 0.45:
+        return None
+
+    x, y, ww, hh = best
+    # Pad ~12 % so soft edges of the original are fully covered, then scale up.
+    px, py = int(ww * 0.12), int(hh * 0.12)
+    x = max(0, x - px); y = max(0, y - py)
+    ww = min(w - x, ww + 2 * px); hh = min(h - y, hh + 2 * py)
+
+    fw = int(round(ww * fx)); fh = int(round(hh * fy))
+    fcx = int(round((x + ww / 2) * fx))
+    fcy = int(round((y + hh / 2) * fy))
+
+    log.debug(
+        f"detect_persistent_logo: bbox=({fcx},{fcy}) {fw}x{fh} conf={best_conf:.2f}"
+    )
+    return PersistentLogo(fcx, fcy, fw, fh, corner_ratio=0.16, confidence=best_conf)
+
+
 # ---------------------------------------------------------------------------
 # Settled-frame extraction  (replaces the old find_end_card)
 # ---------------------------------------------------------------------------

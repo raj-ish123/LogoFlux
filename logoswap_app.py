@@ -406,6 +406,15 @@ section-title, h2 {
       <div class="settings-grid">
 
         <div class="field">
+          <label>Logo mode</label>
+          <select id="persistent-mode">
+            <option value="auto" selected>Auto (detect end-card or throughout-video logo)</option>
+            <option value="off">End-card only (logo appears near the end)</option>
+          </select>
+          <span class="field-hint">Auto also handles logos shown throughout the whole video (any shape/corner).</span>
+        </div>
+
+        <div class="field">
           <label>Size margin (coverage over old icon)</label>
           <div class="range-wrap">
             <input type="range" id="margin-range" min="0" max="0.25" step="0.01" value="0.16"
@@ -503,6 +512,7 @@ function getOptions() {
     settle:        document.getElementById('settle').value.trim(),
     end_window:    parseFloat(document.getElementById('end-window').value),
     track_window:  parseFloat(document.getElementById('track-window').value),
+    persistent:    document.getElementById('persistent-mode').value,
     preview:       document.getElementById('preview-mode').checked,
     contact_sheet: document.getElementById('contact-sheet').checked,
   };
@@ -934,6 +944,7 @@ def _run_job(job_id, logo, videos, output_dir, options):
         keep_temp=False,
         end_window=float(options.get("end_window", 8.0)),
         track_window=float(options.get("track_window", 2.5)),
+        persistent=options.get("persistent", "auto"),
         verbose=False,
     )
 
