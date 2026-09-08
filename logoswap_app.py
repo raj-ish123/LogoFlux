@@ -249,6 +249,22 @@ h2 {
 }
 .chip-del:hover { color: var(--err); }
 
+/* Upload split: drop button (left) + uploaded files (right) */
+.upload-split { display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:stretch; }
+.upload-split .drop-zone { padding:16px 10px; min-height:132px; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.upload-split .dz-icon { font-size:26px; margin-bottom:6px; }
+.upload-split .dz-label { font-size:12px; }
+.upload-split .dz-hint { font-size:10px; line-height:1.35; }
+.upload-list { min-height:132px; max-height:210px; overflow-y:auto; padding-right:2px; }
+.upload-list::-webkit-scrollbar { width:5px; }
+.upload-list::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+.upload-list .file-list { margin-top:0; }
+.upload-list:empty::before,
+#video-chips:empty::before {
+  content:'No files yet'; display:block; text-align:center;
+  font-size:11px; color:var(--text3); padding-top:52px;
+}
+
 /* Logo zone */
 .logo-zone .drop-zone { min-height: 130px; }
 .logo-preview-wrap { margin-top: 14px; display: flex; justify-content: center; }
@@ -373,8 +389,64 @@ h2 {
 .log-WARNING { color: var(--warn); }
 .log-ERROR   { color: var(--err); }
 
-/* ── Results ── */
-.results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 14px; }
+/* ── Results (file-grid of phone tiles) ── */
+.results-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:10px; }
+.results-count { font-size:12px; color:var(--text3); font-weight:600; }
+.btn-dl-all {
+  display:inline-flex; align-items:center; gap:7px;
+  background:linear-gradient(135deg,var(--accent),var(--acc-h)); color:#fff;
+  border:none; border-radius:var(--r-sm); padding:8px 15px;
+  font-size:12px; font-weight:700; cursor:pointer; transition:all var(--trans);
+}
+.btn-dl-all:hover { transform:translateY(-1px); box-shadow:0 4px 16px var(--acc-glow); }
+.results-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap:12px; }
+.result-tile {
+  background:var(--surf); border:1px solid var(--ok); border-radius:var(--r-sm);
+  overflow:hidden; display:flex; flex-direction:column;
+  transition:transform var(--trans), box-shadow var(--trans);
+}
+.result-tile:hover { transform:translateY(-2px); box-shadow:0 6px 18px rgba(63,185,80,.18); }
+.result-tile.preview-tile { border-color:var(--accent); }
+.result-tile.error-tile { border-color:var(--err); opacity:.78; }
+.tile-thumb {
+  position:relative; aspect-ratio:9/16; background:#0b0f1a; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; overflow:hidden;
+}
+.tile-thumb video, .tile-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+.tile-play {
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  background:rgba(0,0,0,.18); color:#fff; font-size:24px; opacity:0; transition:opacity var(--trans);
+}
+.tile-thumb:hover .tile-play { opacity:1; }
+.tile-info { padding:8px 9px 5px; }
+.tile-name { font-size:11px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tile-actions { display:flex; gap:6px; padding:0 9px 9px; margin-top:auto; }
+.tile-dl {
+  flex:1; display:inline-flex; align-items:center; justify-content:center; gap:5px;
+  background:var(--ok); color:#fff; border:none; border-radius:var(--r-xs);
+  padding:6px 8px; font-size:10.5px; font-weight:700; text-decoration:none; cursor:pointer;
+  transition:filter var(--trans);
+}
+.tile-dl:hover { filter:brightness(1.08); }
+.result-sub  { font-size: 11px; color: var(--text3); margin-top: 3px; }
+
+/* ── Phone preview ── */
+.phone-wrap { display:flex; flex-direction:column; align-items:center; gap:14px; }
+.phone {
+  position:relative; width:min(300px, 80vw); aspect-ratio:9/19;
+  background:#000; border:11px solid #10131c; border-radius:40px;
+  box-shadow:0 24px 70px rgba(0,0,0,.55), inset 0 0 0 2px rgba(255,255,255,.05);
+  overflow:hidden;
+}
+.phone-notch {
+  position:absolute; top:0; left:50%; transform:translateX(-50%);
+  width:42%; height:20px; background:#10131c; border-radius:0 0 13px 13px; z-index:2;
+}
+.phone-screen { width:100%; height:100%; object-fit:contain; background:#000; display:block; }
+.phone-caption { font-size:12px; color:#eef2f8; max-width:300px; text-align:center; word-break:break-all; }
+.phone-actions { display:flex; gap:10px; }
+
+/* Legacy result-card (kept for compatibility) */
 .result-card {
   background: var(--surf); border: 1px solid var(--ok);
   border-radius: var(--r); padding: 18px;
@@ -524,13 +596,15 @@ h2 {
           </svg>
           Videos
         </div>
-        <div class="drop-zone" id="videos-zone">
-          <input type="file" id="videos-input" multiple accept=".mp4,.mov,.avi,.mkv,.webm">
-          <div class="dz-icon">🎞️</div>
-          <div class="dz-label">Drop videos here</div>
-          <div class="dz-hint">or click to browse &nbsp;·&nbsp; mp4 mov avi mkv webm</div>
+        <div class="upload-split">
+          <div class="drop-zone" id="videos-zone">
+            <input type="file" id="videos-input" multiple accept=".mp4,.mov,.avi,.mkv,.webm">
+            <div class="dz-icon">🎞️</div>
+            <div class="dz-label">Drop videos</div>
+            <div class="dz-hint">or click to browse</div>
+          </div>
+          <div class="upload-list"><div class="file-list" id="video-chips"></div></div>
         </div>
-        <div class="file-list" id="video-chips"></div>
       </div>
 
       <div class="card logo-zone">
@@ -541,13 +615,15 @@ h2 {
           </svg>
           New Logo (PNG)
         </div>
-        <div class="drop-zone" id="logo-zone">
-          <input type="file" id="logo-input" accept=".png,.jpg,.jpeg,.webp">
-          <div class="dz-icon">🖼️</div>
-          <div class="dz-label">Drop logo here</div>
-          <div class="dz-hint">PNG recommended &nbsp;·&nbsp; transparent bg ideal</div>
+        <div class="upload-split">
+          <div class="drop-zone" id="logo-zone">
+            <input type="file" id="logo-input" accept=".png,.jpg,.jpeg,.webp">
+            <div class="dz-icon">🖼️</div>
+            <div class="dz-label">Drop logo</div>
+            <div class="dz-hint">PNG · transparent bg</div>
+          </div>
+          <div class="upload-list" id="logo-preview-area"></div>
         </div>
-        <div id="logo-preview-area"></div>
       </div>
     </div>
 
@@ -638,6 +714,12 @@ h2 {
           <div class="video-grid" id="video-grid"></div>
         </div>
         <div id="results-section" style="display:none">
+          <div class="results-head">
+            <span class="results-count" id="results-count"></span>
+            <button class="btn-dl-all" id="download-all-btn" type="button" onclick="downloadAll()" style="display:none">
+              ⬇ &nbsp;Download all (.zip)
+            </button>
+          </div>
           <div class="results-grid" id="results-grid"></div>
         </div>
       </div>
@@ -694,6 +776,21 @@ h2 {
     <div class="modal-actions">
       <button class="modal-btn secondary" type="button" onclick="dupDecision('skip')">Skip</button>
       <button class="modal-btn primary"   type="button" onclick="dupDecision('gen')">Generate anyway</button>
+    </div>
+  </div>
+</div>
+
+<!-- Phone preview modal -->
+<div id="preview-modal" class="modal-overlay" style="display:none" onclick="closePreview()">
+  <div class="phone-wrap" onclick="event.stopPropagation()">
+    <div class="phone">
+      <div class="phone-notch"></div>
+      <video id="preview-video" class="phone-screen" controls autoplay playsinline></video>
+    </div>
+    <div class="phone-caption" id="preview-caption"></div>
+    <div class="phone-actions">
+      <a id="preview-dl" class="modal-btn primary" href="#" download>⬇ Download</a>
+      <button class="modal-btn secondary" type="button" onclick="closePreview()">Close</button>
     </div>
   </div>
 </div>
@@ -1074,29 +1171,73 @@ function showResults(results) {
     return;
   }
   const logoName = S.runLogo || (S.logo && S.logo.name) || '';
+  let okCount = 0;
   results.forEach(r => {
-    const card = document.createElement('div');
-    card.className = 'result-card fadein';
+    const tile = document.createElement('div');
+    tile.className = 'result-tile fadein';
     if (!r.ok) {
-      card.classList.add('error-card');
-      card.innerHTML = `<div class="result-icon">❌</div><div class="result-info"><div class="result-name">${esc(r.video)}</div><div class="result-sub">${esc(r.error||'Failed')}</div></div><button class="btn-dl btn-error" disabled>Failed</button>`;
+      tile.classList.add('error-tile');
+      tile.innerHTML =
+        `<div class="tile-thumb" style="cursor:default"><span style="font-size:30px">❌</span></div>` +
+        `<div class="tile-info"><div class="tile-name" title="${esc(r.video)}">${esc(r.video)}</div>` +
+        `<div class="result-sub">${esc(r.error || 'Failed')}</div></div>`;
     } else if (r.is_preview) {
-      card.classList.add('preview-card');
-      card.innerHTML = `<div class="result-icon">🔍</div><div class="result-info"><div class="result-name">${esc(r.video)}</div><div class="result-sub">Detection preview</div></div><img class="result-img" src="${apiUrl('/download/' + S.jobId + '/' + r.output)}" alt="preview"><a class="btn-dl btn-view" href="${apiUrl('/download/' + S.jobId + '/' + r.output)}" download="${esc(r.output)}">⬇ Download preview</a>`;
+      const url = apiUrl('/download/' + S.jobId + '/' + r.output);
+      tile.classList.add('preview-tile');
+      tile.innerHTML =
+        `<div class="tile-thumb" style="cursor:default"><img src="${url}" alt="preview"></div>` +
+        `<div class="tile-info"><div class="tile-name" title="${esc(r.video)}">${esc(r.video)}</div></div>` +
+        `<div class="tile-actions"><a class="tile-dl" href="${url}" download="${esc(r.output)}">⬇ PNG</a></div>`;
     } else {
-      const cs = r.contact_sheet ? `<a class="btn-dl btn-cs" href="${apiUrl('/download/' + S.jobId + '/' + r.contact_sheet)}" download="${esc(r.contact_sheet)}">📋 Contact sheet</a>` : '';
-      card.innerHTML = `<div class="result-icon">🎉</div><div class="result-info"><div class="result-name">${esc(r.output)}</div><div class="result-sub">Rendered successfully</div></div><a class="btn-dl" href="${apiUrl('/download/' + S.jobId + '/' + r.output)}" download="${esc(r.output)}">⬇ Download video</a>${cs}`;
+      okCount++;
+      const viewUrl = apiUrl('/view/' + S.jobId + '/' + r.output);
+      const dlUrl   = apiUrl('/download/' + S.jobId + '/' + r.output);
+      tile.innerHTML =
+        `<div class="tile-thumb">` +
+          `<video muted preload="metadata" playsinline src="${viewUrl}#t=0.1"></video>` +
+          `<div class="tile-play">▶</div>` +
+        `</div>` +
+        `<div class="tile-info"><div class="tile-name" title="${esc(r.output)}">${esc(r.output)}</div></div>` +
+        `<div class="tile-actions"><a class="tile-dl" href="${dlUrl}" download="${esc(r.output)}">⬇ Download</a></div>`;
+      tile.querySelector('.tile-thumb').addEventListener('click', () => openPreview(viewUrl, r.output, dlUrl));
       addHistory({
         date:   new Date().toISOString(),
         video:  r.video,
         logo:   logoName,
         output: r.output,
-        url:    apiUrl('/download/' + S.jobId + '/' + r.output),
+        url:    dlUrl,
       });
     }
-    grid.appendChild(card);
+    grid.appendChild(tile);
   });
+
+  const cnt = document.getElementById('results-count');
+  const dab = document.getElementById('download-all-btn');
+  cnt.textContent = okCount ? (okCount + ' video' + (okCount === 1 ? '' : 's') + ' ready') : '';
+  dab.style.display = okCount > 0 ? '' : 'none';
   renderHistory();
+}
+
+/* ── Phone preview ── */
+function openPreview(viewUrl, name, dlUrl) {
+  const v = document.getElementById('preview-video');
+  v.src = viewUrl;
+  document.getElementById('preview-caption').textContent = name;
+  const dl = document.getElementById('preview-dl');
+  dl.href = dlUrl; dl.setAttribute('download', name);
+  document.getElementById('preview-modal').style.display = 'flex';
+  v.play().catch(function () {});
+}
+function closePreview() {
+  const v = document.getElementById('preview-video');
+  try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+  document.getElementById('preview-modal').style.display = 'none';
+}
+
+/* ── Download all outputs as one zip ── */
+function downloadAll() {
+  if (!S.jobId) return;
+  window.location = apiUrl('/download_all/' + S.jobId);
 }
 
 function esc(s) {
@@ -1244,6 +1385,52 @@ def download(job_id: str, filename: str):
     as_attach = not filename.lower().endswith(".png")
     from flask import send_file
     return send_file(str(path), as_attachment=as_attach)
+
+
+@bp.route("/view/<job_id>/<filename>")
+def view(job_id: str, filename: str):
+    """Serve a file inline (not as a download) so videos play in the phone preview."""
+    if job_id not in _jobs:
+        return "Job not found", 404
+    path = Path(_jobs[job_id]["output_dir"]) / filename
+    if not path.is_file():
+        return "File not found", 404
+    from flask import send_file
+    # conditional=True enables HTTP range requests so the <video> can seek.
+    return send_file(str(path), as_attachment=False, conditional=True)
+
+
+_VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
+
+
+@bp.route("/download_all/<job_id>")
+def download_all(job_id: str):
+    """Bundle every rendered video for a job into a single .zip download."""
+    if job_id not in _jobs:
+        return "Job not found", 404
+    out_dir = Path(_jobs[job_id]["output_dir"])
+    vids = sorted(
+        p for p in out_dir.iterdir()
+        if p.is_file() and p.suffix.lower() in _VIDEO_EXTS
+    )
+    if not vids:
+        return "No videos to download", 404
+
+    import io
+    import zipfile
+    from flask import send_file
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for p in vids:
+            zf.write(str(p), arcname=p.name)
+    buf.seek(0)
+    return send_file(
+        buf,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"LogoFlux_creatives_{job_id[:8]}.zip",
+    )
 
 
 def _run_job(job_id, logo, videos, output_dir, options):
