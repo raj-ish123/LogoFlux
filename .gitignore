@@ -16,23 +16,39 @@ env/
 .venv/
 .env/
 
-# Temp / debug output files
+# Temp / runtime output
 logoswap_ui_*/
-_debug_*/
 *.tmp
 tmp/
+output/
+processed/
 
-# Debug / test scripts (internal use only)
-_debug_onset.py
-_test_onset.py
-_test_onset2.py
-_debug_detect.py
-_read_recording.py
-_find_onset.py
-_measure_icon.py
-_extract_transition.py
-_inspect_outputs.py
-_probe.py
+# Debug / QA artifacts (these can be gigabytes — never commit)
+_anim_analysis/
+_ec/
+_inspect/
+_onset_check/
+_onset_dbg/
+_orig_check/
+_out_check/
+_out_check2/
+_out_endcard/
+_qa*/
+_recording/
+_transition/
+_debug_*/
+_*.py
+_*.png
+
+# Videos and large media (never commit)
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+
+# Deploy zip (generated locally)
+LogoFlux-deploy.zip
 
 # OS
 .DS_Store
@@ -42,14 +58,6 @@ desktop.ini
 # IDE
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
-
-# Output videos / images (don't commit large binaries)
-*.mp4
-*.mov
-*.avi
-*.mkv
-*.webm
-output/
-processed/

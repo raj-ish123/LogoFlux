@@ -38,7 +38,7 @@ _HTML = r"""<!DOCTYPE html>
 <title>LogoFlux</title>
 <link rel="icon" type="image/png" href="__LOGO_URI__">
 <link rel="apple-touch-icon" href="__LOGO_URI__">
-<script>(function(){var v=['light','dark','ocean','sunset'];var t='light';try{var q=new URLSearchParams(location.search).get('theme');t=(q&&v.indexOf(q)>=0)?q:(localStorage.getItem('logoflux-theme')||'light');if(v.indexOf(t)<0)t='light';}catch(e){t='light';}document.documentElement.setAttribute('data-theme',t);})();</script>
+<script>(function(){var v=['light','dark','emerald','rose','slate'];var t='light';try{var q=new URLSearchParams(location.search).get('theme');t=(q&&v.indexOf(q)>=0)?q:(localStorage.getItem('logoflux-theme')||'light');if(v.indexOf(t)<0)t='light';}catch(e){t='light';}document.documentElement.setAttribute('data-theme',t);})();</script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -74,21 +74,29 @@ _HTML = r"""<!DOCTYPE html>
   --nav-bg:rgba(22,27,34,.85); --glow:rgba(124,111,224,.13);
   --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 26px rgba(0,0,0,.4);
 }
-[data-theme="ocean"] {
-  --bg:#eef5fb; --surf:#ffffff; --surf2:#e2eef8; --border:#d3e2ef;
-  --accent:#0ea5e9; --acc-h:#38bdf8; --acc-glow:rgba(14,165,233,.26);
-  --ok:#0d9488; --ok-bg:rgba(13,148,136,.12); --err:#e5484d; --err-bg:rgba(229,72,77,.10);
-  --warn:#c9820a; --text:#0e2233; --text2:#456079; --text3:#7d97ac;
-  --nav-bg:rgba(238,245,251,.82); --glow:rgba(14,165,233,.15);
-  --shadow:0 1px 3px rgba(14,60,90,.07), 0 10px 26px rgba(14,60,90,.06);
+[data-theme="emerald"] {
+  --bg:#eef8f2; --surf:#ffffff; --surf2:#e0f2e9; --border:#cde9dc;
+  --accent:#059669; --acc-h:#10b981; --acc-glow:rgba(5,150,105,.24);
+  --ok:#059669; --ok-bg:rgba(5,150,105,.12); --err:#e5484d; --err-bg:rgba(229,72,77,.10);
+  --warn:#b45309; --text:#0f2a20; --text2:#3f6355; --text3:#7ba394;
+  --nav-bg:rgba(238,248,242,.82); --glow:rgba(5,150,105,.14);
+  --shadow:0 1px 3px rgba(6,60,40,.07), 0 10px 26px rgba(6,60,40,.06);
 }
-[data-theme="sunset"] {
-  --bg:#fdf5ef; --surf:#fffaf6; --surf2:#f7eae0; --border:#f0ddcd;
-  --accent:#f2683c; --acc-h:#fb8f5f; --acc-glow:rgba(242,104,60,.24);
-  --ok:#3f9142; --ok-bg:rgba(63,145,66,.12); --err:#e5484d; --err-bg:rgba(229,72,77,.10);
-  --warn:#bd7c00; --text:#37221a; --text2:#7a5748; --text3:#a88a78;
-  --nav-bg:rgba(253,246,240,.82); --glow:rgba(242,104,60,.15);
-  --shadow:0 1px 3px rgba(90,50,20,.07), 0 10px 26px rgba(90,50,20,.06);
+[data-theme="rose"] {
+  --bg:#fdf2f6; --surf:#fffafc; --surf2:#f9e4ee; --border:#f2d3e0;
+  --accent:#e11d68; --acc-h:#f43f8e; --acc-glow:rgba(225,29,104,.22);
+  --ok:#0d9488; --ok-bg:rgba(13,148,136,.12); --err:#e5484d; --err-bg:rgba(229,72,77,.10);
+  --warn:#be6b00; --text:#3a1526; --text2:#7a4a5e; --text3:#b489a0;
+  --nav-bg:rgba(253,242,246,.82); --glow:rgba(225,29,104,.13);
+  --shadow:0 1px 3px rgba(90,20,50,.07), 0 10px 26px rgba(90,20,50,.06);
+}
+[data-theme="slate"] {
+  --bg:#0f172a; --surf:#1e293b; --surf2:#273349; --border:#334155;
+  --accent:#818cf8; --acc-h:#a5b4fc; --acc-glow:rgba(129,140,248,.35);
+  --ok:#34d399; --ok-bg:rgba(52,211,153,.12); --err:#fb7185; --err-bg:rgba(251,113,133,.12);
+  --warn:#fbbf24; --text:#e2e8f0; --text2:#94a3b8; --text3:#64748b;
+  --nav-bg:rgba(15,23,42,.85); --glow:rgba(129,140,248,.14);
+  --shadow:0 1px 2px rgba(0,0,0,.35), 0 10px 26px rgba(0,0,0,.45);
 }
 html { font-size: 14px; }
 body {
@@ -134,10 +142,11 @@ nav {
 }
 .theme-swatch:hover { transform: scale(1.14); }
 .theme-swatch.active { box-shadow: 0 0 0 2px var(--accent); }
-.sw-light  { background: linear-gradient(135deg,#ffffff 45%,#cfd2ff 55%); }
-.sw-dark   { background: linear-gradient(135deg,#1c222b 45%,#7c6fe0 55%); }
-.sw-ocean  { background: linear-gradient(135deg,#e6f1fa 45%,#0ea5e9 55%); }
-.sw-sunset { background: linear-gradient(135deg,#fde7d8 45%,#f2683c 55%); }
+.sw-light   { background: linear-gradient(135deg,#ffffff 45%,#cfd2ff 55%); }
+.sw-dark    { background: linear-gradient(135deg,#1c222b 45%,#7c6fe0 55%); }
+.sw-emerald { background: linear-gradient(135deg,#e6f6ee 45%,#059669 55%); }
+.sw-rose    { background: linear-gradient(135deg,#fce4ee 45%,#e11d68 55%); }
+.sw-slate   { background: linear-gradient(135deg,#334155 45%,#818cf8 55%); }
 .nav-pill {
   margin-left: 14px;
   font-size: 11px; color: var(--text3);
@@ -146,12 +155,41 @@ nav {
 }
 
 /* ── Layout ── */
-main { max-width: 1020px; margin: 0 auto; padding: 36px 24px; }
-section-title, h2 {
+main { max-width: 1440px; margin: 0 auto; padding: 20px 24px 24px; }
+h2 {
   font-size: 12px; font-weight: 700; text-transform: uppercase;
   letter-spacing: .08em; color: var(--text3);
-  margin-bottom: 14px; display: block;
+  margin-bottom: 12px; display: block;
 }
+
+/* Tabs */
+.tabs { display: flex; gap: 4px; margin-left: 20px; }
+.tab-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 13px; font-weight: 600; color: var(--text3);
+  padding: 7px 15px; border-radius: var(--r-sm);
+  transition: all var(--trans);
+}
+.tab-btn:hover { color: var(--text); background: var(--surf2); }
+.tab-btn.active { color: var(--accent); background: var(--acc-glow); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; animation: fadein .25s ease; }
+
+/* 3-column studio grid */
+.studio-grid {
+  display: grid;
+  grid-template-columns: 320px minmax(0,1fr) minmax(0,1.15fr);
+  gap: 16px; align-items: start;
+}
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.col-scroll { max-height: calc(100vh - 315px); overflow-y: auto; padding-right: 3px; }
+.col-scroll::-webkit-scrollbar { width: 6px; }
+.col-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.col-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text3); margin: 0 0 -4px 2px;
+}
+.log-row { margin-top: 16px; }
 
 /* ── Cards ── */
 .card {
@@ -226,19 +264,7 @@ section-title, h2 {
 }
 
 /* ── Settings ── */
-#settings-card { margin-bottom: 16px; }
-.settings-toggle {
-  display: flex; align-items: center; justify-content: space-between;
-  cursor: pointer; user-select: none;
-  background: none; border: none; width: 100%;
-  color: var(--text2); font-size: 13px; font-weight: 600; padding: 0;
-}
-.settings-toggle:hover { color: var(--text); }
-.toggle-arrow { font-size: 11px; transition: transform .25s; }
-.toggle-arrow.open { transform: rotate(180deg); }
-#settings-body { overflow: hidden; max-height: 0; transition: max-height .35s ease, opacity .25s; opacity: 0; }
-#settings-body.open { max-height: 620px; opacity: 1; }
-.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 22px; padding-top: 18px; }
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 18px; padding-top: 18px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field label { font-size: 12px; color: var(--text2); font-weight: 500; }
 .field input[type=text], .field input[type=number], .field select {
@@ -334,10 +360,12 @@ section-title, h2 {
 .log-clear { font-size: 11px; color: #8b93a7; cursor: pointer; background: none; border: none; transition: color var(--trans); }
 .log-clear:hover { color: #e6edf3; }
 #log-body {
-  height: 230px; overflow-y: auto; padding: 11px 16px;
+  height: 168px; overflow-y: auto; padding: 11px 16px;
   font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
   font-size: 11.5px; line-height: 1.68;
+  color: #c9d3e0;
 }
+#log-body:empty::before { content: 'Waiting for job…'; color: #5b6478; }
 #log-body::-webkit-scrollbar { width: 5px; }
 #log-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 .log-line { white-space: pre-wrap; word-break: break-all; }
@@ -388,12 +416,72 @@ section-title, h2 {
 @keyframes fadein  { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .fadein { animation: fadein .3s ease forwards; }
 
+/* ── Output column ── */
+.output-empty { text-align:center; padding:40px 18px; color:var(--text3); font-size:13px; }
+.output-empty .big-icon { font-size:40px; margin-bottom:12px; opacity:.7; }
+
+/* ── History ── */
+.history-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.history-wrap { overflow-x:auto; }
+.history-table { width:100%; border-collapse:collapse; font-size:13px; }
+.history-table th {
+  text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--text3); font-weight:700; padding:10px 14px; border-bottom:1px solid var(--border);
+}
+.history-table td { padding:11px 14px; border-bottom:1px solid var(--border); color:var(--text2); vertical-align:middle; }
+.history-table tr:hover td { background:var(--surf2); }
+.history-table .h-name { color:var(--text); font-weight:600; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.h-date { color:var(--text3); white-space:nowrap; }
+.h-dl {
+  display:inline-flex; align-items:center; gap:6px;
+  background:var(--ok); color:#fff; border:none; border-radius:var(--r-xs);
+  padding:6px 12px; font-size:11px; font-weight:700; cursor:pointer; text-decoration:none;
+  transition:all var(--trans);
+}
+.h-dl:hover { transform:translateY(-1px); filter:brightness(1.06); }
+.h-clear { font-size:12px; color:var(--text3); cursor:pointer; background:none; border:none; }
+.h-clear:hover { color:var(--err); }
+
+/* ── Modal ── */
+.modal-overlay {
+  position:fixed; inset:0; z-index:1000;
+  background:rgba(10,14,25,.55); backdrop-filter:blur(3px);
+  display:flex; align-items:center; justify-content:center; padding:20px;
+  animation:fadein .18s ease;
+}
+.modal {
+  background:var(--surf); border:1px solid var(--border); border-radius:var(--r);
+  box-shadow:0 20px 60px rgba(0,0,0,.3); padding:24px; width:100%; max-width:440px;
+}
+.modal-icon { font-size:32px; margin-bottom:10px; }
+.modal-title { font-size:17px; font-weight:800; color:var(--text); margin-bottom:8px; }
+.modal-text { font-size:13px; color:var(--text2); margin-bottom:6px; }
+.modal-file {
+  font-size:12px; font-weight:700; color:var(--accent);
+  background:var(--surf2); border:1px solid var(--border); border-radius:var(--r-xs);
+  padding:8px 11px; margin:10px 0 14px; word-break:break-all;
+}
+.modal-all { margin-bottom:16px; }
+.modal-actions { display:flex; gap:10px; justify-content:flex-end; }
+.modal-btn {
+  border:none; border-radius:var(--r-sm); padding:10px 18px;
+  font-size:13px; font-weight:700; cursor:pointer; transition:all var(--trans);
+}
+.modal-btn.secondary { background:var(--surf2); color:var(--text2); border:1px solid var(--border); }
+.modal-btn.secondary:hover { border-color:var(--accent); color:var(--text); }
+.modal-btn.primary { background:linear-gradient(135deg,var(--accent),var(--acc-h)); color:#fff; }
+.modal-btn.primary:hover { transform:translateY(-1px); }
+
 /* ── Responsive ── */
+@media (max-width: 1080px) {
+  .studio-grid { grid-template-columns: 1fr; }
+  .col-scroll { max-height:none; overflow:visible; }
+}
 @media (max-width: 660px) {
   .upload-row { grid-template-columns: 1fr; }
   .settings-grid { grid-template-columns: 1fr; }
-  nav { padding: 14px 16px; }
-  main { padding: 24px 14px; }
+  nav { padding: 14px 16px; flex-wrap:wrap; }
+  main { padding: 18px 14px; }
 }
 </style>
 </head>
@@ -405,134 +493,160 @@ section-title, h2 {
     <div class="nav-title">LogoFlux</div>
     <div class="nav-sub">Automated logo replacement for video</div>
   </div>
-  <div class="theme-picker" id="theme-picker" role="group" aria-label="Theme">
-    <button class="theme-swatch sw-light"  data-theme="light"  title="Light"  type="button" onclick="setTheme('light')"></button>
-    <button class="theme-swatch sw-dark"   data-theme="dark"   title="Dark"   type="button" onclick="setTheme('dark')"></button>
-    <button class="theme-swatch sw-ocean"  data-theme="ocean"  title="Ocean"  type="button" onclick="setTheme('ocean')"></button>
-    <button class="theme-swatch sw-sunset" data-theme="sunset" title="Sunset" type="button" onclick="setTheme('sunset')"></button>
+  <div class="tabs">
+    <button class="tab-btn active" id="tab-studio"  type="button" onclick="showTab('studio')">Studio</button>
+    <button class="tab-btn"        id="tab-history" type="button" onclick="showTab('history')">History</button>
   </div>
-  <div class="nav-pill">v1.0</div>
+  <div class="theme-picker" id="theme-picker" role="group" aria-label="Theme" style="margin-left:auto">
+    <button class="theme-swatch sw-light"   data-theme="light"   title="Light"   type="button" onclick="setTheme('light')"></button>
+    <button class="theme-swatch sw-dark"    data-theme="dark"    title="Dark"    type="button" onclick="setTheme('dark')"></button>
+    <button class="theme-swatch sw-emerald" data-theme="emerald" title="Emerald" type="button" onclick="setTheme('emerald')"></button>
+    <button class="theme-swatch sw-rose"    data-theme="rose"    title="Rose"    type="button" onclick="setTheme('rose')"></button>
+    <button class="theme-swatch sw-slate"   data-theme="slate"   title="Slate"   type="button" onclick="setTheme('slate')"></button>
+  </div>
+  <div class="nav-pill">v1.1</div>
 </nav>
 
 <main>
 
-  <!-- Upload row -->
-  <div class="upload-row">
-    <div class="card">
-      <div class="card-label">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M0 3.5A1.5 1.5 0 0 1 1.5 2h11A1.5 1.5 0 0 1 14 3.5v9A1.5 1.5 0 0 1 12.5 14h-11A1.5 1.5 0 0 1 0 12.5v-9ZM1.5 3a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h11a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5h-11ZM11 6l-3.5 2L11 10V6Z"/>
-        </svg>
-        Videos
-      </div>
-      <div class="drop-zone" id="videos-zone">
-        <input type="file" id="videos-input" multiple accept=".mp4,.mov,.avi,.mkv,.webm">
-        <div class="dz-icon">🎞️</div>
-        <div class="dz-label">Drop videos here</div>
-        <div class="dz-hint">or click to browse &nbsp;·&nbsp; mp4 mov avi mkv webm</div>
-      </div>
-      <div class="file-list" id="video-chips"></div>
-    </div>
+<!-- ══════════ Studio tab ══════════ -->
+<div id="studio-tab" class="tab-panel active">
+  <div class="studio-grid">
 
-    <div class="card logo-zone">
-      <div class="card-label">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z"/>
-          <path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12Zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12Z"/>
-        </svg>
-        New Logo (PNG)
-      </div>
-      <div class="drop-zone" id="logo-zone">
-        <input type="file" id="logo-input" accept=".png,.jpg,.jpeg,.webp">
-        <div class="dz-icon">🖼️</div>
-        <div class="dz-label">Drop logo here</div>
-        <div class="dz-hint">PNG recommended &nbsp;·&nbsp; transparent bg ideal</div>
-      </div>
-      <div id="logo-preview-area"></div>
-    </div>
-  </div>
+    <!-- LEFT · uploads -->
+    <div class="col col-scroll">
+      <div class="col-title">1 · Upload</div>
 
-  <!-- Settings -->
-  <div class="card" id="settings-card" style="margin-bottom:16px">
-    <button class="settings-toggle" onclick="toggleSettings()" type="button">
-      <span>⚙️ &nbsp;Advanced settings</span>
-      <span class="toggle-arrow" id="toggle-arrow">▾</span>
-    </button>
-    <div id="settings-body">
-      <div class="settings-grid">
-
-        <div class="field">
-          <label>Logo mode</label>
-          <select id="persistent-mode">
-            <option value="auto" selected>Auto (detect end-card or throughout-video logo)</option>
-            <option value="off">End-card only (logo appears near the end)</option>
-          </select>
-          <span class="field-hint">Auto also handles logos shown throughout the whole video (any shape/corner).</span>
+      <div class="card">
+        <div class="card-label">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M0 3.5A1.5 1.5 0 0 1 1.5 2h11A1.5 1.5 0 0 1 14 3.5v9A1.5 1.5 0 0 1 12.5 14h-11A1.5 1.5 0 0 1 0 12.5v-9ZM1.5 3a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h11a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5h-11ZM11 6l-3.5 2L11 10V6Z"/>
+          </svg>
+          Videos
         </div>
+        <div class="drop-zone" id="videos-zone">
+          <input type="file" id="videos-input" multiple accept=".mp4,.mov,.avi,.mkv,.webm">
+          <div class="dz-icon">🎞️</div>
+          <div class="dz-label">Drop videos here</div>
+          <div class="dz-hint">or click to browse &nbsp;·&nbsp; mp4 mov avi mkv webm</div>
+        </div>
+        <div class="file-list" id="video-chips"></div>
+      </div>
 
-        <div class="field">
-          <label>Size margin (coverage over old icon)</label>
-          <div class="range-wrap">
-            <input type="range" id="margin-range" min="0" max="0.25" step="0.01" value="0.16"
-              oninput="document.getElementById('margin-val').textContent=(this.value*100).toFixed(0)+'%'">
-            <span class="range-val" id="margin-val">16%</span>
+      <div class="card logo-zone">
+        <div class="card-label">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z"/>
+            <path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12Zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12Z"/>
+          </svg>
+          New Logo (PNG)
+        </div>
+        <div class="drop-zone" id="logo-zone">
+          <input type="file" id="logo-input" accept=".png,.jpg,.jpeg,.webp">
+          <div class="dz-icon">🖼️</div>
+          <div class="dz-label">Drop logo here</div>
+          <div class="dz-hint">PNG recommended &nbsp;·&nbsp; transparent bg ideal</div>
+        </div>
+        <div id="logo-preview-area"></div>
+      </div>
+    </div>
+
+    <!-- MIDDLE · settings -->
+    <div class="col col-scroll">
+      <div class="col-title">2 · Advanced settings</div>
+
+      <div class="card" id="settings-card">
+        <div class="settings-grid" style="padding-top:4px">
+
+          <div class="field full-col">
+            <label>Logo mode</label>
+            <select id="persistent-mode">
+              <option value="auto" selected>Auto (detect end-card or throughout-video logo)</option>
+              <option value="off">End-card only (logo appears near the end)</option>
+            </select>
+            <span class="field-hint">Auto also handles logos shown throughout the whole video (any shape/corner).</span>
           </div>
-          <span class="field-hint">How much larger the replacement logo is vs the detected icon</span>
-        </div>
 
-        <div class="field">
-          <label>Region override <span style="color:var(--text3)">(X Y W H)</span></label>
-          <input type="text" id="region" placeholder="e.g. 537 307 326 326" autocomplete="off">
-          <span class="field-hint">Skips auto-detection. Enable Preview Mode first to measure.</span>
-        </div>
+          <div class="field full-col">
+            <label>Size margin (coverage over old icon)</label>
+            <div class="range-wrap">
+              <input type="range" id="margin-range" min="0" max="0.25" step="0.01" value="0.16"
+                oninput="document.getElementById('margin-val').textContent=(this.value*100).toFixed(0)+'%'">
+              <span class="range-val" id="margin-val">16%</span>
+            </div>
+            <span class="field-hint">How much larger the replacement logo is vs the detected icon</span>
+          </div>
 
-        <div class="field">
-          <label>Pop onset time (TS) in seconds</label>
-          <input type="number" id="start" placeholder="auto-tracked" step="0.01" min="0">
-        </div>
-        <div class="field">
-          <label>Settle time (TSET) in seconds</label>
-          <input type="number" id="settle" placeholder="auto-tracked" step="0.01" min="0">
-        </div>
+          <div class="field full-col">
+            <label>Region override <span style="color:var(--text3)">(X Y W H)</span></label>
+            <input type="text" id="region" placeholder="e.g. 537 307 326 326" autocomplete="off">
+            <span class="field-hint">Skips auto-detection. Enable Preview Mode first to measure.</span>
+          </div>
 
-        <div class="field">
-          <label>End-card scan window (seconds from end)</label>
-          <input type="number" id="end-window" value="8" min="2" max="30" step="1">
-        </div>
-        <div class="field">
-          <label>Pop tracking window (seconds after cut)</label>
-          <input type="number" id="track-window" value="2.5" min="0.5" max="10" step="0.5">
-        </div>
+          <div class="field">
+            <label>Pop onset (TS) sec</label>
+            <input type="number" id="start" placeholder="auto" step="0.01" min="0">
+          </div>
+          <div class="field">
+            <label>Settle time (TSET) sec</label>
+            <input type="number" id="settle" placeholder="auto" step="0.01" min="0">
+          </div>
 
-        <div class="field full-col">
-          <label>Options</label>
-          <div class="checkbox-row">
-            <label class="checkbox-label">
-              <input type="checkbox" id="preview-mode">
-              Preview only (detect PNG, no render)
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" id="contact-sheet">
-              Contact sheet (QA strip per video)
-            </label>
+          <div class="field">
+            <label>End-card scan (s from end)</label>
+            <input type="number" id="end-window" value="8" min="2" max="30" step="1">
+          </div>
+          <div class="field">
+            <label>Pop track window (s)</label>
+            <input type="number" id="track-window" value="2.5" min="0.5" max="10" step="0.5">
+          </div>
+
+          <div class="field full-col">
+            <label>Options</label>
+            <div class="checkbox-row">
+              <label class="checkbox-label">
+                <input type="checkbox" id="preview-mode">
+                Preview only (detect PNG, no render)
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="contact-sheet">
+                Contact sheet (QA strip per video)
+              </label>
+            </div>
           </div>
         </div>
       </div>
+
+      <div class="run-row" style="margin:2px 0 6px">
+        <button id="run-btn" onclick="runJob()" disabled>
+          <div class="btn-spinner"></div>
+          <span class="btn-text">▶ &nbsp;Run LogoFlux</span>
+        </button>
+      </div>
     </div>
+
+    <!-- RIGHT · output -->
+    <div class="col col-scroll">
+      <div class="col-title">3 · Output</div>
+
+      <div class="card" id="output-card">
+        <div id="output-empty" class="output-empty">
+          <div class="big-icon">📤</div>
+          Results appear here after you run a job.
+        </div>
+        <div id="progress-section" style="display:none">
+          <div class="video-grid" id="video-grid"></div>
+        </div>
+        <div id="results-section" style="display:none">
+          <div class="results-grid" id="results-grid"></div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
-  <!-- Run button -->
-  <div class="run-row">
-    <button id="run-btn" onclick="runJob()" disabled>
-      <div class="btn-spinner"></div>
-      <span class="btn-text">▶ &nbsp;Run LogoFlux</span>
-    </button>
-  </div>
-
-  <!-- Progress -->
-  <div id="progress-section" style="display:none">
-    <h2>Progress</h2>
-    <div class="video-grid" id="video-grid"></div>
+  <!-- BOTTOM · log -->
+  <div class="log-row">
     <div class="log-card">
       <div class="log-header">
         <span class="log-header-title">📋 Log output</span>
@@ -540,16 +654,49 @@ section-title, h2 {
       </div>
       <div id="log-body"></div>
     </div>
-    <hr class="divider">
   </div>
+</div>
 
-  <!-- Results -->
-  <div id="results-section" style="display:none">
-    <h2>Results</h2>
-    <div class="results-grid" id="results-grid"></div>
+<!-- ══════════ History tab ══════════ -->
+<div id="history-tab" class="tab-panel">
+  <div class="card">
+    <div class="history-head">
+      <h2 style="margin:0">Generated videos</h2>
+      <button class="h-clear" type="button" onclick="clearHistory()">Clear history</button>
+    </div>
+    <div class="history-wrap">
+      <table class="history-table" id="history-table">
+        <thead>
+          <tr><th>Date</th><th>Video</th><th>Logo</th><th>Output name</th><th></th></tr>
+        </thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </div>
+    <div id="history-empty" class="output-empty">
+      <div class="big-icon">🗂️</div>
+      No videos generated yet.
+    </div>
   </div>
+</div>
 
 </main>
+
+<!-- Duplicate-generation modal -->
+<div id="dup-modal" class="modal-overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-icon">♻️</div>
+    <div class="modal-title">Already generated</div>
+    <div class="modal-text">This video was already generated with this logo:</div>
+    <div class="modal-file" id="dup-name"></div>
+    <label class="checkbox-label modal-all" id="dup-all-wrap">
+      <input type="checkbox" id="dup-all"> Do this for all remaining duplicates
+    </label>
+    <div class="modal-actions">
+      <button class="modal-btn secondary" type="button" onclick="dupDecision('skip')">Skip</button>
+      <button class="modal-btn primary"   type="button" onclick="dupDecision('gen')">Generate anyway</button>
+    </div>
+  </div>
+</div>
 
 <script>
 'use strict';
@@ -584,11 +731,97 @@ function getOptions() {
   };
 }
 
-function toggleSettings() {
-  const body = document.getElementById('settings-body');
-  const arrow = document.getElementById('toggle-arrow');
-  const open = body.classList.toggle('open');
-  arrow.classList.toggle('open', open);
+/* ── Tabs ── */
+function showTab(name) {
+  ['studio', 'history'].forEach(function (n) {
+    document.getElementById(n + '-tab').classList.toggle('active', n === name);
+    document.getElementById('tab-' + n).classList.toggle('active', n === name);
+  });
+  if (name === 'history') renderHistory();
+}
+
+/* ── History (persisted in localStorage) ── */
+const HKEY = 'logoflux-history';
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem(HKEY)) || []; } catch (e) { return []; }
+}
+function saveHistory(list) {
+  try { localStorage.setItem(HKEY, JSON.stringify(list.slice(0, 200))); } catch (e) {}
+}
+function addHistory(rec) {
+  const list = loadHistory();
+  list.unshift(rec);
+  saveHistory(list);
+}
+function isGenerated(videoName, logoName) {
+  return loadHistory().some(function (h) { return h.video === videoName && h.logo === logoName; });
+}
+function clearHistory() {
+  if (!confirm('Clear all history? This cannot be undone.')) return;
+  saveHistory([]);
+  renderHistory();
+}
+function renderHistory() {
+  const body  = document.getElementById('history-body');
+  const empty = document.getElementById('history-empty');
+  const table = document.getElementById('history-table');
+  const list  = loadHistory();
+  body.innerHTML = '';
+  if (!list.length) { empty.style.display = ''; table.style.display = 'none'; return; }
+  empty.style.display = 'none'; table.style.display = '';
+  list.forEach(function (h) {
+    const tr = document.createElement('tr');
+    const when = new Date(h.date);
+    const dstr = isNaN(when.getTime()) ? (h.date || '') :
+      when.toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const dl = h.url
+      ? `<a class="h-dl" href="${esc(h.url)}" download="${esc(h.output)}">⬇ Download</a>`
+      : `<span style="color:var(--text3);font-size:11px">expired</span>`;
+    tr.innerHTML =
+      `<td class="h-date">${esc(dstr)}</td>` +
+      `<td class="h-name" title="${esc(h.video)}">${esc(h.video)}</td>` +
+      `<td title="${esc(h.logo)}">${esc(h.logo)}</td>` +
+      `<td class="h-name" title="${esc(h.output)}">${esc(h.output)}</td>` +
+      `<td>${dl}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+/* ── Duplicate-generation resolution ── */
+let _dupResolve = null;
+function promptDup(name, remaining) {
+  return new Promise(function (resolve) {
+    document.getElementById('dup-name').textContent = name;
+    document.getElementById('dup-all-wrap').style.display = remaining > 1 ? '' : 'none';
+    document.getElementById('dup-all').checked = false;
+    document.getElementById('dup-modal').style.display = 'flex';
+    _dupResolve = resolve;
+  });
+}
+function dupDecision(decision) {
+  const all = document.getElementById('dup-all').checked;
+  document.getElementById('dup-modal').style.display = 'none';
+  const r = _dupResolve; _dupResolve = null;
+  if (r) r({ decision: decision, all: all });
+}
+async function resolveDuplicates(videos, logoName) {
+  const dupFlags = videos.map(function (v) { return isGenerated(v.name, logoName); });
+  if (!dupFlags.some(Boolean)) return videos.slice();
+  const keep = [];
+  let applyAll = null;
+  let remainingDups = dupFlags.filter(Boolean).length;
+  for (let i = 0; i < videos.length; i++) {
+    if (!dupFlags[i]) { keep.push(videos[i]); continue; }
+    let decision = applyAll;
+    if (!decision) {
+      const res = await promptDup(videos[i].name, remainingDups);
+      decision = res.decision;
+      if (res.all) applyAll = decision;
+    }
+    remainingDups--;
+    if (decision === 'gen') keep.push(videos[i]);
+  }
+  return keep;
 }
 
 function refreshRunBtn() {
@@ -675,23 +908,30 @@ async function handleLogoFile(files) {
 
 async function runJob() {
   if (!S.logo || !S.videos.length) return;
+
+  // Prompt for anything already generated with this logo.
+  const toRun = await resolveDuplicates(S.videos, S.logo.name);
+  if (!toRun.length) return;   // everything skipped
+
+  S.runVideos = toRun;
+  S.runLogo   = S.logo.name;
   S.cards = {};
   ['video-grid','log-body','results-grid'].forEach(id => { document.getElementById(id).innerHTML = ''; });
+  document.getElementById('output-empty').style.display = 'none';
   document.getElementById('progress-section').style.display = '';
   document.getElementById('results-section').style.display = 'none';
-  window.scrollTo({ top: document.getElementById('progress-section').offsetTop - 80, behavior: 'smooth' });
 
   const btn = document.getElementById('run-btn');
   btn.disabled = true; btn.classList.add('loading');
   btn.querySelector('.btn-text').textContent = '⏳  Running…';
 
-  S.videos.forEach((v, i) => addVideoCard(v.name, i));
+  toRun.forEach((v, i) => addVideoCard(v.name, i));
 
   try {
     const res = await fetch(apiUrl('/run'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ logo_id: S.logo.id, video_ids: S.videos.map(v => v.id), options: getOptions() }),
+      body: JSON.stringify({ logo_id: S.logo.id, video_ids: toRun.map(v => v.id), options: getOptions() }),
     });
     const data = await res.json();
     if (!res.ok) { alert('Error: ' + (data.error || res.status)); resetRunBtn(); return; }
@@ -703,7 +943,7 @@ async function runJob() {
 function resetRunBtn() {
   const btn = document.getElementById('run-btn');
   btn.disabled = false; btn.classList.remove('loading');
-  btn.querySelector('.btn-text').textContent = '▶ \u00a0Run logoswap';
+  btn.querySelector('.btn-text').textContent = '▶ \u00a0Run LogoFlux';
 }
 
 function pollJob(jobId) {
@@ -826,12 +1066,14 @@ function clearLog() { document.getElementById('log-body').innerHTML = ''; }
 function showResults(results) {
   const sec  = document.getElementById('results-section');
   const grid = document.getElementById('results-grid');
+  document.getElementById('output-empty').style.display = 'none';
   sec.style.display = '';
   grid.innerHTML = '';
   if (!results || !results.length) {
     grid.innerHTML = '<div class="empty-state"><div class="big-icon">😶</div>No results.</div>';
     return;
   }
+  const logoName = S.runLogo || (S.logo && S.logo.name) || '';
   results.forEach(r => {
     const card = document.createElement('div');
     card.className = 'result-card fadein';
@@ -844,10 +1086,17 @@ function showResults(results) {
     } else {
       const cs = r.contact_sheet ? `<a class="btn-dl btn-cs" href="${apiUrl('/download/' + S.jobId + '/' + r.contact_sheet)}" download="${esc(r.contact_sheet)}">📋 Contact sheet</a>` : '';
       card.innerHTML = `<div class="result-icon">🎉</div><div class="result-info"><div class="result-name">${esc(r.output)}</div><div class="result-sub">Rendered successfully</div></div><a class="btn-dl" href="${apiUrl('/download/' + S.jobId + '/' + r.output)}" download="${esc(r.output)}">⬇ Download video</a>${cs}`;
+      addHistory({
+        date:   new Date().toISOString(),
+        video:  r.video,
+        logo:   logoName,
+        output: r.output,
+        url:    apiUrl('/download/' + S.jobId + '/' + r.output),
+      });
     }
     grid.appendChild(card);
   });
-  sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  renderHistory();
 }
 
 function esc(s) {
@@ -857,6 +1106,7 @@ function cardId(n) { return n.replace(/[^a-z0-9]/gi,'_'); }
 
 setupDropZone('videos-zone', 'videos-input', true,  handleVideoFiles);
 setupDropZone('logo-zone',   'logo-input',   false, handleLogoFile);
+renderHistory();
 </script>
 </body>
 </html>"""
