@@ -35,31 +35,60 @@ _HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>logoswap</title>
+<title>LogoFlux</title>
 <link rel="icon" type="image/png" href="__LOGO_URI__">
 <link rel="apple-touch-icon" href="__LOGO_URI__">
+<script>(function(){var v=['light','dark','ocean','sunset'];var t='light';try{var q=new URLSearchParams(location.search).get('theme');t=(q&&v.indexOf(q)>=0)?q:(localStorage.getItem('logoflux-theme')||'light');if(v.indexOf(t)<0)t='light';}catch(e){t='light';}document.documentElement.setAttribute('data-theme',t);})();</script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg:       #0d1117;
-  --surf:     #161b22;
-  --surf2:    #21262d;
-  --border:   #30363d;
-  --accent:   #7c6fe0;
-  --acc-h:    #9b8fec;
-  --acc-glow: rgba(124,111,224,.35);
-  --ok:       #3fb950;
-  --ok-bg:    rgba(63,185,80,.12);
-  --err:      #f85149;
-  --err-bg:   rgba(248,81,73,.12);
-  --warn:     #e3b341;
-  --text:     #e6edf3;
-  --text2:    #8b949e;
-  --text3:    #6e7681;
-  --r:        12px;
-  --r-sm:     8px;
-  --r-xs:     5px;
+  /* ── Light (default) ── */
+  --bg:       #f4f5fb;
+  --surf:     #ffffff;
+  --surf2:    #eef1f8;
+  --border:   #e4e8f1;
+  --accent:   #6c5ce7;
+  --acc-h:    #8b7cf0;
+  --acc-glow: rgba(108,92,231,.26);
+  --ok:       #10a34a;
+  --ok-bg:    rgba(16,163,74,.12);
+  --err:      #e5484d;
+  --err-bg:   rgba(229,72,77,.10);
+  --warn:     #c9820a;
+  --text:     #1a2030;
+  --text2:    #56607a;
+  --text3:    #8b93a7;
+  --nav-bg:   rgba(255,255,255,.82);
+  --glow:     rgba(108,92,231,.13);
+  --shadow:   0 1px 3px rgba(20,24,45,.06), 0 10px 26px rgba(20,24,45,.05);
+  --r:        13px;
+  --r-sm:     9px;
+  --r-xs:     6px;
   --trans:    .2s ease;
+}
+[data-theme="dark"] {
+  --bg:#0d1117; --surf:#161b22; --surf2:#21262d; --border:#30363d;
+  --accent:#7c6fe0; --acc-h:#9b8fec; --acc-glow:rgba(124,111,224,.35);
+  --ok:#3fb950; --ok-bg:rgba(63,185,80,.12); --err:#f85149; --err-bg:rgba(248,81,73,.12);
+  --warn:#e3b341; --text:#e6edf3; --text2:#8b949e; --text3:#6e7681;
+  --nav-bg:rgba(22,27,34,.85); --glow:rgba(124,111,224,.13);
+  --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 26px rgba(0,0,0,.4);
+}
+[data-theme="ocean"] {
+  --bg:#eef5fb; --surf:#ffffff; --surf2:#e2eef8; --border:#d3e2ef;
+  --accent:#0ea5e9; --acc-h:#38bdf8; --acc-glow:rgba(14,165,233,.26);
+  --ok:#0d9488; --ok-bg:rgba(13,148,136,.12); --err:#e5484d; --err-bg:rgba(229,72,77,.10);
+  --warn:#c9820a; --text:#0e2233; --text2:#456079; --text3:#7d97ac;
+  --nav-bg:rgba(238,245,251,.82); --glow:rgba(14,165,233,.15);
+  --shadow:0 1px 3px rgba(14,60,90,.07), 0 10px 26px rgba(14,60,90,.06);
+}
+[data-theme="sunset"] {
+  --bg:#fdf5ef; --surf:#fffaf6; --surf2:#f7eae0; --border:#f0ddcd;
+  --accent:#f2683c; --acc-h:#fb8f5f; --acc-glow:rgba(242,104,60,.24);
+  --ok:#3f9142; --ok-bg:rgba(63,145,66,.12); --err:#e5484d; --err-bg:rgba(229,72,77,.10);
+  --warn:#bd7c00; --text:#37221a; --text2:#7a5748; --text3:#a88a78;
+  --nav-bg:rgba(253,246,240,.82); --glow:rgba(242,104,60,.15);
+  --shadow:0 1px 3px rgba(90,50,20,.07), 0 10px 26px rgba(90,50,20,.06);
 }
 html { font-size: 14px; }
 body {
@@ -72,31 +101,45 @@ body {
 }
 body::before {
   content: '';
-  position: fixed; inset: 0; pointer-events: none;
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
   background: radial-gradient(ellipse 70% 40% at 50% -5%,
-    rgba(124,111,224,.12) 0%, transparent 70%);
+    var(--glow) 0%, transparent 70%);
 }
+main, nav { position: relative; z-index: 1; }
 
 /* ── Nav ── */
 nav {
   display: flex; align-items: center; gap: 14px;
-  padding: 18px 32px;
+  padding: 16px 32px;
   border-bottom: 1px solid var(--border);
-  background: rgba(22,27,34,.85);
+  background: var(--nav-bg);
   backdrop-filter: blur(14px);
   position: sticky; top: 0; z-index: 100;
 }
 .nav-logo { line-height: 0; display: flex; align-items: center; }
-.nav-logo img { width: 30px; height: 30px; display: block; }
+.nav-logo img { width: 34px; height: 34px; display: block; border-radius: 9px; box-shadow: var(--shadow); }
 .nav-title {
-  font-size: 21px; font-weight: 800;
-  background: linear-gradient(135deg, var(--text) 0%, var(--acc-h) 100%);
+  font-size: 22px; font-weight: 800; letter-spacing: -.01em;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--acc-h) 100%);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 .nav-sub { font-size: 12px; color: var(--text3); margin-top: 1px; }
+.theme-picker { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.theme-swatch {
+  width: 21px; height: 21px; border-radius: 50%; cursor: pointer; padding: 0;
+  border: 2px solid transparent; outline: none;
+  box-shadow: 0 0 0 1.5px var(--border);
+  transition: transform var(--trans), box-shadow var(--trans);
+}
+.theme-swatch:hover { transform: scale(1.14); }
+.theme-swatch.active { box-shadow: 0 0 0 2px var(--accent); }
+.sw-light  { background: linear-gradient(135deg,#ffffff 45%,#cfd2ff 55%); }
+.sw-dark   { background: linear-gradient(135deg,#1c222b 45%,#7c6fe0 55%); }
+.sw-ocean  { background: linear-gradient(135deg,#e6f1fa 45%,#0ea5e9 55%); }
+.sw-sunset { background: linear-gradient(135deg,#fde7d8 45%,#f2683c 55%); }
 .nav-pill {
-  margin-left: auto;
+  margin-left: 14px;
   font-size: 11px; color: var(--text3);
   background: var(--surf2); border: 1px solid var(--border);
   padding: 3px 11px; border-radius: 20px; letter-spacing: .02em;
@@ -116,6 +159,7 @@ section-title, h2 {
   border: 1px solid var(--border);
   border-radius: var(--r);
   padding: 22px;
+  box-shadow: var(--shadow);
 }
 .card-label {
   font-size: 12px; font-weight: 600; color: var(--text2);
@@ -197,13 +241,17 @@ section-title, h2 {
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 22px; padding-top: 18px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field label { font-size: 12px; color: var(--text2); font-weight: 500; }
-.field input[type=text], .field input[type=number] {
+.field input[type=text], .field input[type=number], .field select {
   background: var(--surf2); border: 1px solid var(--border);
   border-radius: var(--r-xs); padding: 8px 11px;
   color: var(--text); font-size: 13px;
   outline: none; transition: border-color var(--trans);
 }
-.field input:focus { border-color: var(--accent); }
+.field select { cursor: pointer; appearance: none; -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text3) 50%), linear-gradient(135deg, var(--text3) 50%, transparent 50%);
+  background-position: calc(100% - 15px) center, calc(100% - 10px) center;
+  background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 30px; }
+.field input:focus, .field select:focus { border-color: var(--accent); }
 .field input::placeholder { color: var(--text3); }
 .range-wrap { display: flex; align-items: center; gap: 10px; }
 .range-wrap input[type=range] { flex: 1; accent-color: var(--accent); }
@@ -220,7 +268,7 @@ section-title, h2 {
 /* ── Run ── */
 .run-row { display: flex; justify-content: center; margin: 22px 0 30px; }
 #run-btn {
-  background: linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--acc-h) 100%);
   color: #fff; border: none; border-radius: var(--r);
   padding: 15px 58px; font-size: 16px; font-weight: 800;
   cursor: pointer;
@@ -244,6 +292,7 @@ section-title, h2 {
 .vcard {
   background: var(--surf); border: 1px solid var(--border);
   border-radius: var(--r); padding: 17px 20px;
+  box-shadow: var(--shadow);
   transition: border-color var(--trans);
 }
 .vcard.done  { border-color: var(--ok); }
@@ -276,14 +325,14 @@ section-title, h2 {
 .vcard-stage { font-size: 11px; color: var(--text3); margin-top: 7px; }
 
 /* Log */
-.log-card { background: #0a0c10; border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+.log-card { background: #0d1220; border: 1px solid rgba(255,255,255,.08); border-radius: var(--r); overflow: hidden; box-shadow: var(--shadow); }
 .log-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 16px; background: var(--surf2); border-bottom: 1px solid var(--border);
+  padding: 10px 16px; background: #12182a; border-bottom: 1px solid rgba(255,255,255,.06);
 }
-.log-header-title { font-size: 12px; font-weight: 600; color: var(--text3); }
-.log-clear { font-size: 11px; color: var(--text3); cursor: pointer; background: none; border: none; transition: color var(--trans); }
-.log-clear:hover { color: var(--text); }
+.log-header-title { font-size: 12px; font-weight: 600; color: #8b93a7; }
+.log-clear { font-size: 11px; color: #8b93a7; cursor: pointer; background: none; border: none; transition: color var(--trans); }
+.log-clear:hover { color: #e6edf3; }
 #log-body {
   height: 230px; overflow-y: auto; padding: 11px 16px;
   font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
@@ -302,6 +351,7 @@ section-title, h2 {
   background: var(--surf); border: 1px solid var(--ok);
   border-radius: var(--r); padding: 18px;
   display: flex; flex-direction: column; gap: 13px;
+  box-shadow: var(--shadow);
   transition: transform var(--trans), box-shadow var(--trans);
 }
 .result-card:hover { transform: translateY(-2px); box-shadow: 0 6px 22px rgba(63,185,80,.15); }
@@ -314,7 +364,7 @@ section-title, h2 {
 .result-img  { width: 100%; border-radius: var(--r-xs); border: 1px solid var(--border); max-height: 130px; object-fit: contain; background: var(--surf2); }
 .btn-dl {
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  background: var(--ok); color: #000;
+  background: var(--ok); color: #fff;
   border: none; border-radius: var(--r-sm);
   padding: 10px 18px; font-size: 12px; font-weight: 800;
   cursor: pointer; text-decoration: none;
@@ -350,10 +400,16 @@ section-title, h2 {
 <body>
 
 <nav>
-  <span class="nav-logo"><img src="__LOGO_URI__" alt="logoswap"></span>
+  <span class="nav-logo"><img src="__LOGO_URI__" alt="LogoFlux"></span>
   <div>
-    <div class="nav-title">logoswap</div>
-    <div class="nav-sub">Automated game icon replacement</div>
+    <div class="nav-title">LogoFlux</div>
+    <div class="nav-sub">Automated logo replacement for video</div>
+  </div>
+  <div class="theme-picker" id="theme-picker" role="group" aria-label="Theme">
+    <button class="theme-swatch sw-light"  data-theme="light"  title="Light"  type="button" onclick="setTheme('light')"></button>
+    <button class="theme-swatch sw-dark"   data-theme="dark"   title="Dark"   type="button" onclick="setTheme('dark')"></button>
+    <button class="theme-swatch sw-ocean"  data-theme="ocean"  title="Ocean"  type="button" onclick="setTheme('ocean')"></button>
+    <button class="theme-swatch sw-sunset" data-theme="sunset" title="Sunset" type="button" onclick="setTheme('sunset')"></button>
   </div>
   <div class="nav-pill">v1.0</div>
 </nav>
@@ -469,7 +525,7 @@ section-title, h2 {
   <div class="run-row">
     <button id="run-btn" onclick="runJob()" disabled>
       <div class="btn-spinner"></div>
-      <span class="btn-text">▶ &nbsp;Run logoswap</span>
+      <span class="btn-text">▶ &nbsp;Run LogoFlux</span>
     </button>
   </div>
 
@@ -498,6 +554,16 @@ section-title, h2 {
 <script>
 'use strict';
 const S = { videos: [], logo: null, jobId: null, cards: {} };
+
+/* ── Theme switching ── */
+function setTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  try { localStorage.setItem('logoflux-theme', t); } catch (e) {}
+  document.querySelectorAll('.theme-swatch').forEach(function (b) {
+    b.classList.toggle('active', b.getAttribute('data-theme') === t);
+  });
+}
+setTheme(document.documentElement.getAttribute('data-theme') || 'light');
 
 function apiUrl(path) {
   const base = (typeof window !== 'undefined' && window.__APP_BASE_PATH__) || '';
@@ -1040,7 +1106,7 @@ if __name__ == "__main__":
 
     print()
     print("  +--------------------------------------+")
-    print("  |   logoswap  -  Web UI               |")
+    print("  |   LogoFlux  -  Web UI               |")
     print("  |   http://localhost:5000             |")
     print("  +--------------------------------------+")
     print()
