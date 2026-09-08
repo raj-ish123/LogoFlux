@@ -457,10 +457,16 @@ def _process_one(
 ) -> Optional[Path]:
     """Full pipeline for a single video. Returns output path or None on failure."""
     from .probe import probe_video, extract_frames_at_rate, load_frame_rgb
-    from .detect import get_settled_frame, detect_icon, find_icon_onset
+    from .detect import (
+        get_settled_frame, detect_icon, find_icon_onset,
+        detect_persistent_logo, detect_corner_logo, measure_endcard_zoom,
+    )
     from .track import track_pop, FIXED_CURVE, PopResult
     from .logo import build_rounded_logo, save_rounded_logo
-    from .render import generate_sequence, render_video, render_simple, render_slide_in, save_contact_sheet
+    from .render import (
+        generate_sequence, generate_zoom_sequence,
+        render_video, render_simple, render_slide_in, save_contact_sheet,
+    )
 
     name = video_path.stem
 
@@ -589,25 +595,77 @@ def _process_one(
                 log.info(f"[{name}] Icon onset: {onset_time:.3f}s (with 6-frame buffer)")
 
             # -------------------------------------------------------------- #
+            # 4b. Zoom-out end-card: logo appears huge and shrinks to settled.
+            #     Measure its per-frame size/centre so the replacement tracks
+            #     it exactly (a plain scale-pop leaves the original exposed).
+            # -------------------------------------------------------------- #
+            zoom = None
+            if args.start is None and args.settle is None:
+                zoom = measure_endcard_zoom(
+                    video_path, settled_frame,
+                    region.cx, region.cy, region.size,
+                    onset_time, fps, vw, vh,
+                )
+            # The logo's true entrance (huge frame) precedes the background
+            # onset; use it so the replacement covers the whole zoom.
+            entrance_time = zoom.times[0] if zoom is not None else onset_time
+
+            # -------------------------------------------------------------- #
+            # 4c. Hybrid: a small same-brand CORNER watermark present during
+            #     gameplay that vanishes at the end-card.  Template-match the
+            #     detected icon in the frame corners and, if found, replace it
+            #     for [0, entrance] beneath the end-card logo.
+            # -------------------------------------------------------------- #
+            corner_overlay = None
+            if persistent_mode != "off" and not manual_override:
+                corner = detect_corner_logo(
+                    video_path, settled_frame, region, entrance_time,
+                )
+                if corner is not None:
+                    dist = ((corner.cx - region.cx) ** 2 +
+                            (corner.cy - region.cy) ** 2) ** 0.5
+                    if dist > region.size * 0.6:
+                        cover = max(corner.w, corner.h)
+                        c_rgba, c_size = build_rounded_logo(
+                            logo_path, corner_ratio=corner.corner_ratio,
+                            settled_size=cover, margin=args.margin,
+                        )
+                        c_path = tmp / "corner_logo.png"
+                        save_rounded_logo(c_rgba, c_path)
+                        corner_overlay = {
+                            "path": str(c_path), "size": c_size,
+                            "cx": corner.cx, "cy": corner.cy,
+                            "end": entrance_time,
+                        }
+                        log.info(
+                            f"[{name}] Hybrid corner logo: center=({corner.cx},"
+                            f"{corner.cy}) {corner.w}x{corner.h} "
+                            f"conf={corner.confidence:.2f} → replacing during "
+                            f"gameplay [0,{entrance_time:.2f}s]"
+                        )
+
+            # -------------------------------------------------------------- #
             # 5. Detect animation type: slide-from-top OR scale-pop OR static
             # -------------------------------------------------------------- #
             # Priority: slide detection first (more specific), then scale pop,
             # then static (no animation).
 
-            is_slide, slide_dur = _detect_slide_animation(
-                video_path, region.cx, region.cy, region.size,
-                onset_time, fps, settled_frame,
-            )
-            log.info(f"[{name}] Slide-from-top: {is_slide}" +
-                     (f"  dur={slide_dur:.3f}s" if is_slide else ""))
-
+            is_slide, slide_dur = False, 0.0
             has_anim = False
-            if not is_slide:
-                has_anim = _check_animation(
+            if zoom is None:
+                is_slide, slide_dur = _detect_slide_animation(
                     video_path, region.cx, region.cy, region.size,
-                    onset_time, fps,
+                    onset_time, fps, settled_frame,
                 )
-                log.info(f"[{name}] Pop animation detected: {has_anim}")
+                log.info(f"[{name}] Slide-from-top: {is_slide}" +
+                         (f"  dur={slide_dur:.3f}s" if is_slide else ""))
+
+                if not is_slide:
+                    has_anim = _check_animation(
+                        video_path, region.cx, region.cy, region.size,
+                        onset_time, fps,
+                    )
+                    log.info(f"[{name}] Pop animation detected: {has_anim}")
 
             # -------------------------------------------------------------- #
             # 6. Build logo
@@ -632,7 +690,26 @@ def _process_one(
             output_path = output_dir / out_name
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            if is_slide:
+            if zoom is not None:
+                # -- Zoom-out render: replacement tracks the shrinking logo ──
+                seq_dir = tmp / "zseq"
+                generate_zoom_sequence(
+                    logo_rgba, zoom.sizes, zoom.centers, vw, vh, seq_dir,
+                )
+                log.info(
+                    f"[{name}] Rendering (zoom-out, {len(zoom.sizes)} frames, "
+                    f"{entrance_time:.3f}→{zoom.settle_time:.3f}s) → {out_name}"
+                )
+                render_video(
+                    video_path, output_path,
+                    logo_rgba_path, logo_size,
+                    region.cx, region.cy,
+                    entrance_time, zoom.settle_time,
+                    seq_dir, fps_frac, has_audio,
+                    onset_time=entrance_time,
+                    corner=corner_overlay,
+                )
+            elif is_slide:
                 # -- Slide-from-top render ─────────────────────────────────
                 # Duration: match original (measured from frame data; cap at 0.25s)
                 # Apply a 2% speed reduction so the animation feels a touch smoother.
@@ -650,8 +727,18 @@ def _process_one(
                     f"dur={actual_dur:.3f}s at {onset_time:.3f}s"
                     f"  start_oy={slide_start_oy}) → {out_name}"
                 )
+                slide_src = video_path
+                if corner_overlay is not None:
+                    inter = tmp / "corner_inter.mp4"
+                    render_simple(
+                        video_path, inter,
+                        corner_overlay["path"], corner_overlay["size"],
+                        corner_overlay["cx"], corner_overlay["cy"],
+                        0.0, has_audio, end_time=onset_time,
+                    )
+                    slide_src = inter
                 render_slide_in(
-                    video_path, output_path,
+                    slide_src, output_path,
                     logo_rgba_path, logo_size,
                     region.cx, region.cy,
                     onset_time, actual_dur, has_audio,
@@ -698,6 +785,7 @@ def _process_one(
                     pop.ts, pop.tset,
                     seq_dir, fps_frac, has_audio,
                     onset_time=onset_time,
+                    corner=corner_overlay,
                 )
             else:
                 # -- Static render: logo appears instantly at onset ─────────
@@ -707,6 +795,7 @@ def _process_one(
                     logo_rgba_path, logo_size,
                     region.cx, region.cy,
                     onset_time, has_audio,
+                    corner=corner_overlay,
                 )
 
             size_kb = output_path.stat().st_size // 1024

@@ -33,6 +33,17 @@ class IconRegion:
 
 
 @dataclass
+class ZoomTrack:
+    """Per-frame geometry of an end-card logo that zooms out (huge → settled)."""
+    times: list           # absolute timestamps (s) per animation frame
+    sizes: list           # measured original-logo size (px) per frame
+    centers: list         # (cx, cy) per frame
+    settle_time: float    # time at which the logo is fully settled
+    settle_size: int      # settled size (px)
+    settle_center: tuple  # (cx, cy) settled
+
+
+@dataclass
 class PersistentLogo:
     """A logo/watermark that stays fixed throughout the whole video."""
     cx: int               # bbox center x (full-res px)
@@ -54,6 +65,8 @@ def detect_persistent_logo(
     video_h: int,
     n_samples: int = 20,
     std_thresh: float = 12.0,
+    t_start: float = 0.0,
+    t_end: Optional[float] = None,
 ) -> Optional[PersistentLogo]:
     """
     Detect a logo/branding watermark that persists (nearly unchanged) for the
@@ -67,17 +80,28 @@ def detect_persistent_logo(
     This is completely shape-agnostic: it finds square app-icons, wide text
     badges, circular emblems, etc.  Returns None when no confident persistent
     logo is found, so the caller can fall back to end-card detection.
+
+    ``t_start``/``t_end`` restrict the temporal analysis window.  For a hybrid
+    video (persistent corner logo during gameplay + a big animated end-card
+    logo at the very end), pass ``t_end = end_card_onset`` so the corner logo
+    is still classified as *persistent* over the gameplay portion even though
+    it disappears during the end-card.
     """
     import logging
     import subprocess
     log = logging.getLogger("logoswap.detect")
+
+    win_start = max(0.0, t_start)
+    win_end = duration if t_end is None else min(duration, t_end)
+    if win_end - win_start < 1.0:               # window too short to be useful
+        return None
 
     sw = min(video_w, 384)                       # working width
     with tempfile.TemporaryDirectory(prefix="logoswap_pl_") as _tmp:
         tmp = Path(_tmp)
         frames = []
         for i in range(n_samples):
-            t = duration * (i + 0.5) / n_samples
+            t = win_start + (win_end - win_start) * (i + 0.5) / n_samples
             fp = tmp / f"s{i:02d}.png"
             cmd = [
                 "ffmpeg", "-y", "-ss", f"{t:.3f}", "-i", str(video_path),
@@ -161,6 +185,283 @@ def detect_persistent_logo(
         f"detect_persistent_logo: bbox=({fcx},{fcy}) {fw}x{fh} conf={best_conf:.2f}"
     )
     return PersistentLogo(fcx, fcy, fw, fh, corner_ratio=0.16, confidence=best_conf)
+
+
+# ---------------------------------------------------------------------------
+# Corner-logo detection (hybrid: same-brand watermark in a frame corner)
+# ---------------------------------------------------------------------------
+
+def detect_corner_logo(
+    video_path: str | Path,
+    settled_frame_rgb: np.ndarray,
+    region: "IconRegion",
+    onset: float,
+    n_samples: int = 6,
+    min_score: float = 0.60,
+) -> Optional[PersistentLogo]:
+    """
+    Detect a small brand watermark sitting in a frame corner throughout
+    gameplay (a *hybrid* video that also has a big end-card logo).
+
+    Temporal-stability detection fails on these because the whole scene
+    backdrop (e.g. a desk) is often static too — not just the logo.  Instead
+    we exploit the fact that the corner watermark is the SAME brand asset as
+    the end-card icon: we build a template from the detected settled icon and
+    multi-scale template-match it in each of the four corners across several
+    gameplay frames.  A corner with a strong, consistent match is the logo.
+
+    Returns a PersistentLogo (square bbox) or None.
+    """
+    import logging
+    import tempfile as _tmpmod
+    from .probe import extract_single_frame, load_frame_rgb
+    log = logging.getLogger("logoswap.detect")
+
+    half = region.size // 2
+    H, W = settled_frame_rgb.shape[:2]
+    ix0 = max(0, region.cx - half); iy0 = max(0, region.cy - half)
+    ix1 = min(W, region.cx + half); iy1 = min(H, region.cy + half)
+    if ix1 - ix0 < 20 or iy1 - iy0 < 20:
+        return None
+    tmpl_full = cv2.cvtColor(
+        settled_frame_rgb[iy0:iy1, ix0:ix1], cv2.COLOR_RGB2GRAY
+    )
+
+    cw, ch = int(W * 0.35), int(H * 0.30)
+    corner_boxes = {
+        "TL": (0, 0, cw, ch),
+        "TR": (W - cw, 0, W, ch),
+        "BL": (0, H - ch, cw, H),
+        "BR": (W - cw, H - ch, W, H),
+    }
+
+    # Sample gameplay frames well before the end-card.
+    t_lo, t_hi = 1.0, max(1.5, onset - 0.8)
+    if t_hi - t_lo < 0.5:
+        return None
+
+    hits: dict[str, list] = {k: [] for k in corner_boxes}
+    with _tmpmod.TemporaryDirectory(prefix="logoswap_cl_") as _tt:
+        tt = Path(_tt)
+        for i in range(n_samples):
+            t = t_lo + (t_hi - t_lo) * (i + 0.5) / n_samples
+            fp = tt / f"c{i:02d}.png"
+            try:
+                extract_single_frame(video_path, t, fp)
+                frame = load_frame_rgb(fp)
+            except Exception:
+                continue
+            g = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            for name, (x0, y0, x1, y1) in corner_boxes.items():
+                roi = g[y0:y1, x0:x1]
+                best = (-1.0, None)
+                for s in np.linspace(0.035, 0.22, 32):
+                    tp = int(W * s)
+                    if tp < 24 or tp >= roi.shape[0] or tp >= roi.shape[1]:
+                        continue
+                    tmpl = cv2.resize(tmpl_full, (tp, tp))
+                    res = cv2.matchTemplate(roi, tmpl, cv2.TM_CCOEFF_NORMED)
+                    _, mv, _, ml = cv2.minMaxLoc(res)
+                    if mv > best[0]:
+                        best = (mv, (x0 + ml[0], y0 + ml[1], tp))
+                if best[0] >= min_score and best[1] is not None:
+                    hits[name].append((best[0], *best[1]))
+
+    # Pick the corner with the most consistent strong matches.
+    best_corner, best_list = None, []
+    for name, lst in hits.items():
+        if len(lst) >= max(2, n_samples // 2) and len(lst) > len(best_list):
+            best_corner, best_list = name, lst
+    if best_corner is None:
+        return None
+
+    arr = np.array([[h[1], h[2], h[3], h[0]] for h in best_list], dtype=np.float32)
+    mx = int(np.median(arr[:, 0]))
+    my = int(np.median(arr[:, 1]))
+    sz = int(np.median(arr[:, 2]))
+    score = float(np.median(arr[:, 3]))
+    cx = mx + sz // 2
+    cy = my + sz // 2
+
+    log.info(
+        f"detect_corner_logo: {best_corner} corner logo at ({cx},{cy}) "
+        f"{sz}x{sz}  score={score:.2f}  ({len(best_list)}/{n_samples} frames)"
+    )
+    return PersistentLogo(cx, cy, sz, sz, corner_ratio=region.corner_ratio, confidence=score)
+
+
+# ---------------------------------------------------------------------------
+# End-card zoom-out measurement
+# ---------------------------------------------------------------------------
+
+def measure_endcard_zoom(
+    video_path: str | Path,
+    settled_frame_rgb: np.ndarray,
+    cx: int,
+    cy: int,
+    settled_size: int,
+    onset: float,
+    fps: float,
+    video_w: int,
+    video_h: int,
+    window: float = 1.5,
+) -> Optional[ZoomTrack]:
+    """
+    Detect and measure a *zoom-out* end-card logo entrance: the logo appears
+    huge (often near full-screen) and shrinks down to its settled size.
+
+    A plain scale-pop tracker (which assumes the logo grows from small to
+    settled) cannot cover this: while the original is still larger than
+    settled, a settled-size replacement leaves the original poking out around
+    the edges.  This routine measures the original logo's bounding box in
+    every frame from ``onset`` forward by isolating the central, non-background
+    blob (works for any flat-background end-card, light or dark), so the
+    replacement can be rendered at the exact per-frame size and centre.
+
+    Returns a ``ZoomTrack`` when a genuine zoom-out is detected, else None so
+    the caller falls back to the normal pop/slide/static logic.
+    """
+    import logging
+    from .probe import extract_single_frame, load_frame_rgb
+    log = logging.getLogger("logoswap.detect")
+
+    H, W = settled_frame_rgb.shape[:2]
+    half = settled_size // 2
+    ix0 = max(0, cx - half); iy0 = max(0, cy - half)
+    ix1 = min(W, cx + half); iy1 = min(H, cy + half)
+    if ix1 - ix0 < 20 or iy1 - iy0 < 20:
+        return None
+    icon_gray = cv2.cvtColor(settled_frame_rgb[iy0:iy1, ix0:ix1], cv2.COLOR_RGB2GRAY)
+
+    # Work at reduced resolution for speed; measurements are scaled back up.
+    work_w = min(W, 540)
+    sc = work_w / float(W)
+    work_h = int(round(H * sc))
+    roi_y1 = int(work_h * 0.80)         # exclude the bottom (PLAY NOW / badges)
+    ACCEPT = 0.45                       # template-match score to trust a frame
+
+    scales = np.linspace(0.6, 2.6, 21)
+
+    def _measure(frame_rgb: np.ndarray):
+        """Return (size, cx, cy, score) of the best template match, or None."""
+        g = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2GRAY)
+        g = cv2.resize(g, (work_w, work_h))
+        roi = g[:roi_y1, :]
+        best = (-1.0, None)
+        for s in scales:
+            tp = int(settled_size * s * sc)
+            if tp < 24 or tp >= roi.shape[0] or tp >= roi.shape[1]:
+                continue
+            tmpl = cv2.resize(icon_gray, (tp, tp))
+            res = cv2.matchTemplate(roi, tmpl, cv2.TM_CCOEFF_NORMED)
+            _, mv, _, ml = cv2.minMaxLoc(res)
+            if mv > best[0]:
+                size_full = int(settled_size * s)
+                fcx = int((ml[0] + tp / 2) / sc)
+                fcy = int((ml[1] + tp / 2) / sc)
+                best = (mv, (size_full, fcx, fcy))
+        if best[1] is None or best[0] < ACCEPT:
+            return None
+        size_full, fcx, fcy = best[1]
+        return (size_full, fcx, fcy, float(best[0]))
+
+    # Scan from before the reported onset (the logo appears huge before the
+    # background settles) through to the settled state.
+    look_back = 0.7
+    t_scan0 = max(0.0, onset - look_back)
+    n_frames = int((look_back + window) * fps)
+    times, sizes, centers = [], [], []
+    import tempfile as _tmpmod
+    with _tmpmod.TemporaryDirectory(prefix="logoswap_zoom_") as _tt:
+        tt = Path(_tt)
+        for i in range(n_frames):
+            t = t_scan0 + i / fps
+            fp = tt / f"z{i:03d}.png"
+            try:
+                extract_single_frame(video_path, t, fp)
+                frame = load_frame_rgb(fp)
+            except Exception:
+                break
+            m = _measure(frame)
+            times.append(t)
+            if m is None:
+                sizes.append(None); centers.append(None)
+            else:
+                sizes.append(m[0]); centers.append((m[1], m[2]))
+
+    good = [s for s in sizes if s is not None]
+    # Require a DRAMATIC zoom-out (logo ≥1.8× settled).  Normal burst-pop
+    # end-cards peak around 1.5× and must keep using the pop path, so this
+    # gate avoids regressing them.
+    if len(good) < 4 or max(good) < settled_size * 1.80:
+        return None
+
+    # Settle index: first accepted frame at/under 1.12× settled that stays low.
+    settle_idx = None
+    for i in range(len(sizes) - 1):
+        if (sizes[i] is not None and sizes[i + 1] is not None
+                and sizes[i] <= settled_size * 1.12
+                and sizes[i + 1] <= settled_size * 1.12):
+            settle_idx = i
+            break
+    if settle_idx is None:
+        for i in range(len(sizes) - 1, -1, -1):
+            if sizes[i] is not None:
+                settle_idx = i
+                break
+    if settle_idx is None:
+        return None
+
+    # Entrance: walk backward from settle across the contiguous run of accepted
+    # (logo-present) frames.  Stops at the gameplay/transition discontinuity.
+    ent = settle_idx
+    while ent - 1 >= 0 and sizes[ent - 1] is not None:
+        ent -= 1
+
+    if sizes[ent] is None or sizes[ent] < settled_size * 1.40:
+        return None
+
+    out_times, out_sizes, out_centers = [], [], []
+    last_size = sizes[ent]
+    last_center = centers[ent] if centers[ent] is not None else (cx, cy)
+    for i in range(ent, settle_idx + 1):
+        s, c = sizes[i], centers[i]
+        if s is None:
+            s, c = last_size, last_center
+        else:
+            last_size, last_center = s, c
+        out_times.append(times[i])
+        out_sizes.append(int(s))
+        out_centers.append((int(c[0]), int(c[1])))
+
+    # Prepend 3 frames sized larger than the entrance to cover the 1-3 heavily
+    # motion-blurred frames just before the logo becomes matchable (where it is
+    # even bigger).  These sit at the entrance centre.
+    ecx, ecy = out_centers[0]
+    big = int(out_sizes[0] * 1.32)
+    for k in range(3, 0, -1):
+        out_times.insert(0, out_times[0] - 1.0 / fps)
+        out_sizes.insert(0, big)
+        out_centers.insert(0, (ecx, ecy))
+
+    # Enforce a non-increasing (zoom-OUT) profile.
+    for i in range(len(out_sizes) - 2, -1, -1):
+        if out_sizes[i] < out_sizes[i + 1]:
+            out_sizes[i] = out_sizes[i + 1]
+
+    log.info(
+        f"measure_endcard_zoom: ZOOM-OUT detected  max={max(out_sizes)}px → "
+        f"settled≈{settled_size}px  frames={len(out_sizes)}  "
+        f"entrance@{out_times[0]:.3f}s  settle@{times[settle_idx]:.3f}s"
+    )
+    return ZoomTrack(
+        times=out_times,
+        sizes=out_sizes,
+        centers=out_centers,
+        settle_time=times[settle_idx],
+        settle_size=settled_size,
+        settle_center=(cx, cy),
+    )
 
 
 # ---------------------------------------------------------------------------

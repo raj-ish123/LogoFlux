@@ -113,6 +113,7 @@ def _render(
     has_audio: bool,
     aux_inputs: list,
     make_filter,
+    disable_seg: bool = False,
 ) -> None:
     """
     Encode the composited video.
@@ -122,11 +123,14 @@ def _render(
     make_filter: callable(t0) -> filter_complex string, where every absolute
                  time reference is shifted by t0 (used when the tail is seeked
                  with -ss so its timeline starts at 0).
+    disable_seg: force a full re-encode (used when an overlay spans the head of
+                 the video, e.g. a persistent corner logo, so the head cannot
+                 be stream-copied).
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    cut = _seg_cut(video_path, overlay_start, has_audio)
+    cut = None if disable_seg else _seg_cut(video_path, overlay_start, has_audio)
     if cut is not None:
         try:
             _render_tail_concat(video_path, output_path, cut, has_audio, aux_inputs, make_filter)
@@ -224,6 +228,36 @@ def generate_sequence(
     return out_dir
 
 
+def generate_zoom_sequence(
+    logo_rgba: Image.Image,
+    sizes: list[int],
+    centers: list[tuple[int, int]],
+    video_w: int,
+    video_h: int,
+    out_dir: Path,
+    cover_margin: float = 0.20,
+) -> Path:
+    """
+    Write one transparent PNG per frame for a *zoom-out* end-card entrance.
+
+    Unlike ``generate_sequence`` (fixed centre, scale curve) this places the
+    logo at an explicit per-frame pixel size AND centre so the replacement
+    exactly tracks an original logo that starts huge and shrinks to settled.
+    Each frame's logo is oversized by ``cover_margin`` to guarantee the
+    original is fully hidden underneath.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for f, (size, (cx, cy)) in enumerate(zip(sizes, centers)):
+        px_size = max(1, round(size * (1.0 + cover_margin)))
+        scaled = logo_rgba.resize((px_size, px_size), Image.LANCZOS)
+        canvas = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))
+        canvas.paste(scaled, (round(cx - px_size / 2), round(cy - px_size / 2)), scaled)
+        canvas.save(str(out_dir / f"f{f:04d}.png"))
+
+    return out_dir
+
+
 # ---------------------------------------------------------------------------
 # ffmpeg composite render
 # ---------------------------------------------------------------------------
@@ -241,6 +275,7 @@ def render_video(
     fps_frac: str,
     has_audio: bool,
     onset_time: float | None = None,
+    corner: dict | None = None,
 ) -> None:
     """
     Composite and encode the final video.
@@ -260,6 +295,10 @@ def render_video(
     onset_time    : if provided and < ts, show static logo from onset_time
                     so the replacement appears before the animation begins
                     (prevents any flash of the original icon during transition)
+    corner        : optional persistent-corner-logo overlay to composite for
+                    the whole gameplay portion, dict with keys
+                    {path, size, cx, cy, end}.  When present a full re-encode
+                    is forced (the overlay spans the video head).
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -288,14 +327,14 @@ def render_video(
             "-i", str(logo_rgba_path),
             "-i", str(f0000),
         ]
+        next_idx = 4                      # [1]=seq [2]=logo [3]=f0000
 
-        def make_filter(t0: float) -> str:
-            # All absolute times shifted by t0 (0 for full encode, cut for tail).
+        def core_filter(base: str, t0: float) -> str:
             e, s, se = early - t0, ts - t0, tset - t0
             return (
                 f"[2:v]scale={logo_size}:{logo_size}[stat];"
                 f"[1:v]setpts=PTS+{s:.3f}/TB[anim];"
-                f"[0:v][3:v]overlay=0:0:enable='between(t,{e:.3f},{s:.3f})'[pre];"
+                f"[{base}][3:v]overlay=0:0:enable='between(t,{e:.3f},{s:.3f})'[pre];"
                 f"[pre][anim]overlay=0:0:enable='between(t,{s:.3f},{se:.3f})'[a];"
                 f"[a][stat]overlay={ox}:{oy}:enable='gte(t,{se:.3f})'[outv]"
             )
@@ -305,18 +344,40 @@ def render_video(
             "-i", str(seq_dir / "f%04d.png"),
             "-i", str(logo_rgba_path),
         ]
+        next_idx = 3                      # [1]=seq [2]=logo
 
-        def make_filter(t0: float) -> str:
+        def core_filter(base: str, t0: float) -> str:
             e, s, se = early - t0, ts - t0, tset - t0
             static_enable = f"gte(t,{e:.3f})*(1-between(t,{s:.3f},{se:.3f}))"
             return (
                 f"[2:v]scale={logo_size}:{logo_size}[stat];"
                 f"[1:v]setpts=PTS+{s:.3f}/TB[anim];"
-                f"[0:v][stat]overlay={ox}:{oy}:enable='{static_enable}'[a];"
+                f"[{base}][stat]overlay={ox}:{oy}:enable='{static_enable}'[a];"
                 f"[a][anim]overlay=0:0:enable='between(t,{s:.3f},{se:.3f})'[outv]"
             )
 
-    _render(video_path, output_path, early, has_audio, aux_inputs, make_filter)
+    corner_idx = None
+    if corner is not None:
+        corner_idx = next_idx
+        aux_inputs = aux_inputs + ["-i", str(corner["path"])]
+
+    def make_filter(t0: float) -> str:
+        if corner_idx is None:
+            return core_filter("0:v", t0)
+        cs = int(corner["size"])
+        cox = round(corner["cx"] - cs / 2)
+        coy = round(corner["cy"] - cs / 2)
+        cend = corner["end"] - t0
+        pre = (
+            f"[{corner_idx}:v]scale={cs}:{cs}[cornr];"
+            f"[0:v][cornr]overlay={cox}:{coy}:enable='between(t,{-t0:.3f},{cend:.3f})'[base];"
+        )
+        return pre + core_filter("base", t0)
+
+    _render(
+        video_path, output_path, early, has_audio, aux_inputs, make_filter,
+        disable_seg=(corner is not None),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -400,10 +461,21 @@ def render_simple(
     cy: int,
     onset_time: float,
     has_audio: bool,
+    end_time: float | None = None,
+    corner: dict | None = None,
 ) -> None:
     """
     Overlay the (already-scaled RGBA) logo starting at onset_time with
     NO animation – the logo just appears instantly at settled size.
+
+    When ``end_time`` is given the overlay is only shown in
+    [onset_time, end_time] (used for a persistent corner logo that must stop
+    before the end-card takes over).  A full re-encode is then forced because
+    the overlay spans the video head.
+
+    ``corner`` optionally composites a persistent corner logo (dict with keys
+    {path, size, cx, cy, end}) across the gameplay portion, on top of which the
+    static end-card logo is drawn.
 
     Much faster than render_video because no PNG sequence is needed.
     """
@@ -414,15 +486,39 @@ def render_simple(
     oy = round(cy - logo_size / 2)
 
     aux_inputs = ["-i", str(logo_rgba_path)]
+    corner_idx = None
+    if corner is not None:
+        corner_idx = 2
+        aux_inputs = aux_inputs + ["-i", str(corner["path"])]
 
     def make_filter(t0: float) -> str:
         onset = onset_time - t0
+        if end_time is None:
+            enable = f"gte(t,{onset:.3f})"
+        else:
+            enable = f"between(t,{onset:.3f},{end_time - t0:.3f})"
+        base = "0:v"
+        pre = ""
+        if corner_idx is not None:
+            cs = int(corner["size"])
+            cox = round(corner["cx"] - cs / 2)
+            coy = round(corner["cy"] - cs / 2)
+            pre = (
+                f"[{corner_idx}:v]scale={cs}:{cs}[cornr];"
+                f"[0:v][cornr]overlay={cox}:{coy}:"
+                f"enable='between(t,{-t0:.3f},{corner['end'] - t0:.3f})'[base];"
+            )
+            base = "base"
         return (
-            f"[1:v]scale={logo_size}:{logo_size}[logo];"
-            f"[0:v][logo]overlay={ox}:{oy}:enable='gte(t,{onset:.3f})'[outv]"
+            pre
+            + f"[1:v]scale={logo_size}:{logo_size}[logo];"
+            + f"[{base}][logo]overlay={ox}:{oy}:enable='{enable}'[outv]"
         )
 
-    _render(video_path, output_path, onset_time, has_audio, aux_inputs, make_filter)
+    _render(
+        video_path, output_path, onset_time, has_audio, aux_inputs, make_filter,
+        disable_seg=(end_time is not None or corner is not None),
+    )
 
 
 # ---------------------------------------------------------------------------
