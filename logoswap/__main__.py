@@ -74,8 +74,8 @@ Examples
         ),
     )
     p.add_argument(
-        "--margin", type=float, default=0.16,
-        help="Fractional oversize margin vs detected icon (default 0.16 = 16%%).",
+        "--margin", type=float, default=0.08,
+        help="Fractional oversize margin vs detected icon (default 0.08 = 8%%).",
     )
     p.add_argument(
         "--region", nargs=4, type=int, metavar=("X", "Y", "W", "H"),
@@ -459,7 +459,7 @@ def _process_one(
     from .probe import probe_video, extract_frames_at_rate, load_frame_rgb
     from .detect import (
         get_settled_frame, detect_icon, find_icon_onset,
-        detect_persistent_logo, detect_corner_logo, measure_endcard_zoom,
+        find_icon_region_onset, detect_corner_logo, measure_endcard_zoom,
     )
     from .track import track_pop, FIXED_CURVE, PopResult
     from .logo import build_rounded_logo, save_rounded_logo
@@ -488,52 +488,6 @@ def _process_one(
 
         with tempfile.TemporaryDirectory(prefix=f"logoswap_{name}_") as _tmp:
             tmp = Path(_tmp)
-
-            # -------------------------------------------------------------- #
-            # 1b. Persistent-logo mode: if a logo is present THROUGHOUT the
-            #     whole video (a fixed corner watermark of any shape), replace
-            #     it for the entire duration instead of only at the end-card.
-            # -------------------------------------------------------------- #
-            persistent_mode = getattr(args, "persistent", "auto")
-            manual_override = (args.region is not None) or (args.start is not None)
-            if persistent_mode != "off" and not manual_override and not args.preview:
-                from .detect import detect_persistent_logo
-
-                log.info(f"[{name}] Checking for a persistent (throughout-video) logo…")
-                persist = detect_persistent_logo(video_path, duration, vw, vh)
-                if persist is not None:
-                    log.info(
-                        f"[{name}] Persistent logo found: center=({persist.cx},{persist.cy}) "
-                        f"{persist.w}x{persist.h}  conf={persist.confidence:.2f} "
-                        f"→ replacing across the whole video"
-                    )
-                    cover = max(persist.w, persist.h)
-                    logo_rgba, logo_size = build_rounded_logo(
-                        logo_path,
-                        corner_ratio=persist.corner_ratio,
-                        settled_size=cover,
-                        margin=args.margin,
-                    )
-                    logo_rgba_path = tmp / "logo_rgba.png"
-                    save_rounded_logo(logo_rgba, logo_rgba_path)
-
-                    out_name = _safe_output_name(name, logo_stem, output_dir)
-                    output_path = output_dir / out_name
-                    output_dir.mkdir(parents=True, exist_ok=True)
-                    log.info(
-                        f"[{name}] Rendering (persistent overlay, {logo_size}px, "
-                        f"full video) → {out_name}"
-                    )
-                    render_simple(
-                        video_path, output_path,
-                        logo_rgba_path, logo_size,
-                        persist.cx, persist.cy,
-                        0.0, has_audio,
-                    )
-                    size_kb = output_path.stat().st_size // 1024
-                    log.info(f"[{name}] Done → {output_path}  ({size_kb} KB)")
-                    return output_path
-                log.info(f"[{name}] No persistent logo; using end-card detection.")
 
             # -------------------------------------------------------------- #
             # 2. Get settled frame (last frame – icon guaranteed present)
@@ -580,19 +534,29 @@ def _process_one(
                 log.info(f"[{name}] Manual onset: {onset_time:.3f}s")
             else:
                 log.info(f"[{name}] Searching for icon onset…")
-                onset_time = find_icon_onset(
+                bg_onset = find_icon_onset(
                     video_path,
                     region.cx, region.cy, region.size,
                     duration,
                     look_back=min(args.end_window, duration * 0.6),
                 )
-                # Nudge back by 6 frames as a safety buffer so the
-                # replacement logo is guaranteed to appear before the
-                # original icon becomes visible.  6 frames (~0.2 s at 30 fps)
-                # is enough to cover game icons that pop in just before the
-                # end-card background transition.
-                onset_time = max(0.0, onset_time - 6.0 / fps)
-                log.info(f"[{name}] Icon onset: {onset_time:.3f}s (with 6-frame buffer)")
+                # Refine: find when the ICON itself first appears in the region,
+                # not just when the end-card background becomes visible.  For many
+                # videos the background appears several seconds before the icon
+                # pops in; using bg_onset would produce a 7 s+ early overlay.
+                forward_look = max(0.0, min(args.end_window, duration - bg_onset))
+                actual_onset = find_icon_region_onset(
+                    video_path,
+                    region.cx, region.cy, region.size,
+                    bg_onset, look_back=1.5, forward_look=forward_look,
+                )
+                # Apply a 2-frame safety buffer so the first frame of the icon
+                # (which may be partially transparent / motion-blurred) is covered.
+                onset_time = max(0.0, actual_onset - 2.0 / fps)
+                log.info(
+                    f"[{name}] Icon onset: {onset_time:.3f}s "
+                    f"(background at {bg_onset:.3f}s, icon visible at {actual_onset:.3f}s)"
+                )
 
             # -------------------------------------------------------------- #
             # 4b. Zoom-out end-card: logo appears huge and shrinks to settled.
@@ -617,6 +581,8 @@ def _process_one(
             #     for [0, entrance] beneath the end-card logo.
             # -------------------------------------------------------------- #
             corner_overlay = None
+            manual_override = (args.region is not None) or (args.start is not None)
+            persistent_mode = getattr(args, "persistent", "auto")
             if persistent_mode != "off" and not manual_override:
                 corner = detect_corner_logo(
                     video_path, settled_frame, region, entrance_time,
@@ -802,7 +768,28 @@ def _process_one(
             log.info(f"[{name}] Done → {output_path}  ({size_kb} KB)")
 
             # -------------------------------------------------------------- #
-            # 8. Contact sheet (optional)
+            # 8. Post-render QA: frame count + onset coverage checks
+            # -------------------------------------------------------------- #
+            from .qa import run_qa
+            qa = run_qa(
+                video_path, output_path,
+                onset_time=onset_time,
+                duration=duration,
+                icon_cx=region.cx,
+                icon_cy=region.cy,
+                icon_size=region.size,
+            )
+            for w_msg in qa.warnings:
+                log.warning(f"[{name}] QA ⚠ {w_msg}")
+            for e_msg in qa.errors:
+                log.error(f"[{name}] QA ✗ {e_msg}")
+            if qa.passed:
+                log.info(f"[{name}] QA passed ✓")
+            else:
+                log.warning(f"[{name}] QA checks incomplete (non-fatal; verify output manually)")
+
+            # -------------------------------------------------------------- #
+            # 9. Contact sheet (optional)
             # -------------------------------------------------------------- #
             if args.contact_sheet:
                 cs_path = output_dir / f"{name}_contact.png"

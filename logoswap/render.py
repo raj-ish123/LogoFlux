@@ -36,7 +36,7 @@ log = logging.getLogger("logoswap.render")
 # negligible, but it is dramatically faster on weak CPUs.  Override with env
 # vars (LOGOSWAP_X264_PRESET / LOGOSWAP_X264_CRF) for higher quality on beefier
 # machines, e.g. PRESET=slow CRF=18.
-_X264_PRESET = os.environ.get("LOGOSWAP_X264_PRESET", "ultrafast")
+_X264_PRESET = os.environ.get("LOGOSWAP_X264_PRESET", "veryfast")
 _X264_CRF = os.environ.get("LOGOSWAP_X264_CRF", "21")
 
 
@@ -82,7 +82,7 @@ def _x264_args() -> list:
 # (seam-safe for h264).  Falls back to a full encode whenever segmentation is
 # not clearly safe.  Disable with LOGOSWAP_FAST_CONCAT=0.
 
-_FAST_CONCAT = os.environ.get("LOGOSWAP_FAST_CONCAT", "1") not in ("0", "false", "False")
+_FAST_CONCAT = os.environ.get("LOGOSWAP_FAST_CONCAT", "0") not in ("0", "false", "False")
 _TAIL_MARGIN = 0.5   # start the re-encoded tail this many seconds before overlay
 _MIN_HEAD = 5.0      # only segment if the copied head is at least this long
 
@@ -276,6 +276,7 @@ def render_video(
     has_audio: bool,
     onset_time: float | None = None,
     corner: dict | None = None,
+    end_time: float | None = None,
 ) -> None:
     """
     Composite and encode the final video.
@@ -299,6 +300,9 @@ def render_video(
                     the whole gameplay portion, dict with keys
                     {path, size, cx, cy, end}.  When present a full re-encode
                     is forced (the overlay spans the video head).
+    end_time      : if provided, the static overlay stops at this time
+                    (e.g. when the end-card fades to black).  When None the
+                    overlay runs to the end of the video.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -309,6 +313,19 @@ def render_video(
     # Static overlay top-left corner (for settled phase after tset)
     ox = round(cx - logo_size / 2)
     oy = round(cy - logo_size / 2)
+
+    # end_time guard: None means "until end" (no upper bound), otherwise cap at end_time.
+    def _static_enable(t0: float, after_expr: str) -> str:
+        """FFmpeg enable expression for the static (settled) logo layer."""
+        if end_time is None:
+            return f"gte(t,{after_expr})"
+        return f"between(t,{after_expr},{end_time - t0:.3f})"
+
+    def _anim_enable(t0: float, s_expr: str, se_expr: str) -> str:
+        """FFmpeg enable expression for the animated (pop) layer."""
+        if end_time is None:
+            return f"between(t,{s_expr},{se_expr})"
+        return f"between(t,{s_expr},min({se_expr},{end_time - t0:.3f}))"
 
     # Pre-roll: from `early` to `ts` we need to show the logo BEFORE the
     # pop animation starts.  Using the full-size logo for this would cause a
@@ -331,12 +348,17 @@ def render_video(
 
         def core_filter(base: str, t0: float) -> str:
             e, s, se = early - t0, ts - t0, tset - t0
+            anim_en  = _anim_enable(t0, f"{s:.3f}", f"{se:.3f}")
+            if end_time is None:
+                stat_en = f"gte(t,{se:.3f})"
+            else:
+                stat_en = _static_enable(t0, f"{se:.3f}")
             return (
                 f"[2:v]scale={logo_size}:{logo_size}[stat];"
                 f"[1:v]setpts=PTS+{s:.3f}/TB[anim];"
                 f"[{base}][3:v]overlay=0:0:enable='between(t,{e:.3f},{s:.3f})'[pre];"
-                f"[pre][anim]overlay=0:0:enable='between(t,{s:.3f},{se:.3f})'[a];"
-                f"[a][stat]overlay={ox}:{oy}:enable='gte(t,{se:.3f})'[outv]"
+                f"[pre][anim]overlay=0:0:enable='{anim_en}'[a];"
+                f"[a][stat]overlay={ox}:{oy}:enable='{stat_en}'[outv]"
             )
     else:
         aux_inputs = [
@@ -348,12 +370,17 @@ def render_video(
 
         def core_filter(base: str, t0: float) -> str:
             e, s, se = early - t0, ts - t0, tset - t0
-            static_enable = f"gte(t,{e:.3f})*(1-between(t,{s:.3f},{se:.3f}))"
+            anim_en = _anim_enable(t0, f"{s:.3f}", f"{se:.3f}")
+            if end_time is None:
+                static_enable = f"gte(t,{e:.3f})*(1-between(t,{s:.3f},{se:.3f}))"
+            else:
+                et = end_time - t0
+                static_enable = f"between(t,{e:.3f},{et:.3f})*(1-between(t,{s:.3f},{se:.3f}))"
             return (
                 f"[2:v]scale={logo_size}:{logo_size}[stat];"
                 f"[1:v]setpts=PTS+{s:.3f}/TB[anim];"
                 f"[{base}][stat]overlay={ox}:{oy}:enable='{static_enable}'[a];"
-                f"[a][anim]overlay=0:0:enable='between(t,{s:.3f},{se:.3f})'[outv]"
+                f"[a][anim]overlay=0:0:enable='{anim_en}'[outv]"
             )
 
     corner_idx = None

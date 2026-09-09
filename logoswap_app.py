@@ -429,6 +429,13 @@ h2 {
 }
 .tile-dl:hover { filter:brightness(1.08); }
 .result-sub  { font-size: 11px; color: var(--text3); margin-top: 3px; }
+/* QA badges */
+.qa-badge {
+  display:inline-block; font-size:10px; font-weight:700;
+  padding:2px 6px; border-radius:var(--r-xs); margin-top:4px;
+}
+.qa-warn { background:rgba(201,130,10,.15); color:var(--warn); }
+.qa-err  { background:rgba(229,72,77,.14);  color:var(--err); }
 
 /* ── Phone preview ── */
 .phone-wrap { display:flex; flex-direction:column; align-items:center; gap:14px; }
@@ -1100,6 +1107,9 @@ const STAGES = [
   { re: /Rendering \(static/,           pct: 78,  stage: 'Rendering…' },
   { re: /Encoding .*preset/,            pct: 85,  stage: 'Encoding video…' },
   { re: /Encoded .* in /,               pct: 96,  stage: 'Encoded' },
+  { re: /QA passed/,                    pct: 98,  stage: 'QA ✓' },
+  { re: /QA ⚠/,                         pct: 98,  stage: 'QA warning' },
+  { re: /QA ✗/,                         pct: 98,  stage: 'QA failed' },
   { re: /Done →/,                       pct: 100, stage: 'Complete!' },
   { re: /FAILED/,                       pct: 100, stage: 'Failed' },
 ];
@@ -1192,12 +1202,19 @@ function showResults(results) {
       okCount++;
       const viewUrl = apiUrl('/view/' + S.jobId + '/' + r.output);
       const dlUrl   = apiUrl('/download/' + S.jobId + '/' + r.output);
+      const hasQaWarn  = r.qa_warnings && r.qa_warnings.length > 0;
+      const hasQaError = r.qa_errors   && r.qa_errors.length   > 0;
+      const qaBadge = hasQaError
+        ? `<span class="qa-badge qa-err" title="${esc((r.qa_errors||[]).join('\n'))}">⚠ QA fail</span>`
+        : hasQaWarn
+          ? `<span class="qa-badge qa-warn" title="${esc((r.qa_warnings||[]).join('\n'))}">⚠ QA warn</span>`
+          : '';
       tile.innerHTML =
         `<div class="tile-thumb">` +
           `<video muted preload="metadata" playsinline src="${viewUrl}#t=0.1"></video>` +
           `<div class="tile-play">▶</div>` +
         `</div>` +
-        `<div class="tile-info"><div class="tile-name" title="${esc(r.output)}">${esc(r.output)}</div></div>` +
+        `<div class="tile-info"><div class="tile-name" title="${esc(r.output)}">${esc(r.output)}</div>${qaBadge}</div>` +
         `<div class="tile-actions"><a class="tile-dl" href="${dlUrl}" download="${esc(r.output)}">⬇ Download</a></div>`;
       tile.querySelector('.tile-thumb').addEventListener('click', () => openPreview(viewUrl, r.output, dlUrl));
       addHistory({
@@ -1302,6 +1319,29 @@ class _ListHandler(logging.Handler):
                 "level": record.levelname,
                 "message": self.format(record),
             })
+        except Exception:
+            pass
+
+
+class _QATracker(logging.Handler):
+    """Collects QA warning/error messages for the current video being processed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.warnings: list[str] = []
+        self.errors:   list[str] = []
+
+    def reset(self) -> None:
+        self.warnings = []
+        self.errors = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = record.getMessage()
+            if "QA ⚠" in msg:
+                self.warnings.append(msg.split("QA ⚠ ", 1)[-1].strip())
+            elif "QA ✗" in msg:
+                self.errors.append(msg.split("QA ✗ ", 1)[-1].strip())
         except Exception:
             pass
 
@@ -1438,7 +1478,7 @@ def _run_job(job_id, logo, videos, output_dir, options):
     from logoswap.__main__ import _process_one
 
     ns = argparse.Namespace(
-        margin=float(options.get("margin", 0.16)),
+        margin=float(options.get("margin", 0.08)),
         region=_parse_region(options.get("region", "")),
         start=_to_float(options.get("start")),
         settle=_to_float(options.get("settle")),
@@ -1454,12 +1494,15 @@ def _run_job(job_id, logo, videos, output_dir, options):
     handler = _ListHandler(job_id)
     handler.setLevel(logging.INFO)
     handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%H:%M:%S"))
+    qa_tracker = _QATracker()
+    qa_tracker.setLevel(logging.WARNING)
     ls_log = logging.getLogger("logoswap")
     # The web app never runs the CLI's logging.basicConfig(), so the logoswap
     # logger would default to the root level (WARNING) under gunicorn and drop
     # all INFO progress logs. Force INFO here so live logs reach the UI.
     ls_log.setLevel(logging.INFO)
     ls_log.addHandler(handler)
+    ls_log.addHandler(qa_tracker)
 
     logo_path = Path(logo["path"])
     results: list[dict] = []
@@ -1469,6 +1512,7 @@ def _run_job(job_id, logo, videos, output_dir, options):
             vname = entry["name"]
             vpath = Path(entry["path"])
             handler.video_name = vname
+            qa_tracker.reset()
 
             _emit(job_id, {"type": "video_start", "video": vname, "index": i, "total": len(videos)})
 
@@ -1480,7 +1524,11 @@ def _run_job(job_id, logo, videos, output_dir, options):
                 continue
 
             if out is not None:
-                r: dict = {"video": vname, "output": out.name, "ok": True}
+                r: dict = {
+                    "video": vname, "output": out.name, "ok": True,
+                    "qa_warnings": qa_tracker.warnings[:],
+                    "qa_errors":   qa_tracker.errors[:],
+                }
                 cs = output_dir / f"{vpath.stem}_contact.png"
                 if ns.contact_sheet and cs.is_file():
                     r["contact_sheet"] = cs.name
@@ -1500,6 +1548,7 @@ def _run_job(job_id, logo, videos, output_dir, options):
                 _emit(job_id, {"type": "video_error", "video": vname, "error": "Processing returned no output"})
     finally:
         ls_log.removeHandler(handler)
+        ls_log.removeHandler(qa_tracker)
         with _lock:
             _jobs[job_id]["results"] = results
             _jobs[job_id]["status"] = "done"

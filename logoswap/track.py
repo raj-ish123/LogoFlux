@@ -187,25 +187,14 @@ def track_pop(
         )
         raw_curve = FIXED_CURVE.copy()
     elif max(raw_curve) < 1.10:
-        # No meaningful burst detected – the tracker likely measured the
-        # outgoing icon (already full scale) rather than the incoming pop.
-        # Use a short ease-in so the replacement appears to gently pop in
-        # instead of jumping instantly to full size.
+        # No meaningful burst detected – use a short ease-in curve instead of
+        # jumping instantly to full size.
         n = max(4, len(raw_curve))
         log.warning(
             f"Curve has no burst (max={max(raw_curve):.2f}); "
             f"injecting ease-in curve ({n} frames)."
         )
         raw_curve = _make_ease_in_curve(n)
-    elif max(raw_curve) < 1.10:
-        # The curve has no meaningful burst – the tracker likely measured the
-        # outgoing icon (already at full scale) rather than the incoming pop.
-        # Fall back to FIXED_CURVE so the replacement gets a proper pop animation.
-        log.warning(
-            f"Curve shows no burst (max={max(raw_curve):.2f}); "
-            "injecting fixed curve but keeping detected timing."
-        )
-        raw_curve = FIXED_CURVE.copy()
 
     log.debug(
         f"track_pop: onset={ts:.3f}s settle={tset:.3f}s "
@@ -275,7 +264,7 @@ def _estimate_scale_contour(
 
     best: Optional[tuple[int, int, float]] = None   # (w, h, asp)
     min_sz = settled_size * 0.65
-    max_sz = settled_size * 1.85
+    max_sz = settled_size * 2.10   # allow up to 2.1× settled for burst animations
 
     for cnt in cnts:
         x, y, w, h = cv2.boundingRect(cnt)

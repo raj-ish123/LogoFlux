@@ -153,10 +153,18 @@ def detect_persistent_logo(
         # can't be mistaken for a branding logo; cap at 18 %.
         if area < frame_area * 0.003 or area > frame_area * 0.18:
             continue
+        # ── NEW: reject extreme aspect ratios (text bars, thin border strips) ──
+        if min(ww, hh) / max(ww, hh) < 0.55:
+            continue
+        # ── NEW: reject regions too wide/tall to be a corner watermark logo ──
+        # A genuine app-icon watermark is at most ~20 % of the smaller frame dim.
+        if ww > w * 0.22 or hh > h * 0.22:
+            continue
         # Corner proximity: 0 = exactly in a corner, larger = toward centre.
+        # Tightened from 0.38 → 0.30 to exclude things near the frame centre.
         cxr, cyr = (x + ww / 2) / w, (y + hh / 2) / h
         corner_score = min(cxr, 1 - cxr) + min(cyr, 1 - cyr)
-        if corner_score > 0.38:
+        if corner_score > 0.30:
             continue
         fill = cv2.contourArea(cnt) / max(1.0, area)
         region_std = float(std[y:y + hh, x:x + ww].mean())
@@ -197,7 +205,7 @@ def detect_corner_logo(
     region: "IconRegion",
     onset: float,
     n_samples: int = 6,
-    min_score: float = 0.60,
+    min_score: float = 0.70,
 ) -> Optional[PersistentLogo]:
     """
     Detect a small brand watermark sitting in a frame corner throughout
@@ -268,9 +276,12 @@ def detect_corner_logo(
                     hits[name].append((best[0], *best[1]))
 
     # Pick the corner with the most consistent strong matches.
+    # Require at least 2/3 of samples to agree (tightened from n_samples//2)
+    # to reduce false-positive template matches on game tiles.
+    min_hits = max(3, n_samples * 2 // 3)
     best_corner, best_list = None, []
     for name, lst in hits.items():
-        if len(lst) >= max(2, n_samples // 2) and len(lst) > len(best_list):
+        if len(lst) >= min_hits and len(lst) > len(best_list):
             best_corner, best_list = name, lst
     if best_corner is None:
         return None
@@ -580,11 +591,17 @@ def find_icon_region_onset(
     icon_size: int,
     bg_onset: float,
     look_back: float = 1.5,
+    forward_look: float = 8.0,
 ) -> float:
     """
-    Scan forward from ``bg_onset - look_back`` to find the EARLIEST frame
-    where the icon region contains an actual rounded-square app icon –
-    NOT just random game tiles flying through during a transition.
+    Scan from ``bg_onset - look_back`` to ``bg_onset + forward_look`` to find
+    the EARLIEST frame where the icon region contains an actual rounded-square
+    app icon – NOT just random game tiles flying through during a transition.
+
+    This is the primary timing fix: ``find_icon_onset`` returns when the
+    end-card BACKGROUND first appears (which can be several seconds before the
+    icon pops in).  This function pins the overlay start to the actual icon
+    first-appearance, not the background appearance.
 
     Strategy
     --------
@@ -602,7 +619,7 @@ def find_icon_region_onset(
     -------
     float
         Earliest time a real icon is detected in the region.
-        Returns ``bg_onset`` unchanged if nothing is found.
+        Returns ``bg_onset`` unchanged if nothing is found (safe fallback).
     """
     import logging
     log = logging.getLogger("logoswap.detect")
@@ -613,6 +630,7 @@ def find_icon_region_onset(
 
         step = 0.1   # 100 ms between probes – fast enough, cheap enough
         t_start = max(0.0, bg_onset - look_back)
+        t_end   = bg_onset + forward_look   # scan well past bg_onset
 
         # Crop a box ±70 % of icon_size around the expected centre.
         # We pass video_w/h as the *crop* dimensions so size heuristics
@@ -620,7 +638,7 @@ def find_icon_region_onset(
         pad = int(icon_size * 0.70)
 
         t = t_start
-        while t < bg_onset + step * 0.5:
+        while t <= t_end:
             fp = tmp / "probe.png"
             try:
                 extract_single_frame(video_path, max(0.0, t), fp)
@@ -636,13 +654,27 @@ def find_icon_region_onset(
             ch, cw = crop_bgr.shape[:2]
 
             if ch > 0 and cw > 0:
-                # Loose=False: strict solidity (≥0.85) and aspect (≥0.83) –
-                # these thresholds reject irregular game-tile shapes.
-                candidates = _find_candidates(crop_bgr, cw, ch, loose=False)
-                if candidates:
+                # Pass FULL FRAME dimensions so the size filter is calibrated
+                # to the real video resolution (not the smaller crop).  This
+                # raises min_size from ~44 px (crop-based) to ~130 px (frame-
+                # based), filtering out small game tiles / transition particles.
+                candidates = _find_candidates(crop_bgr, W, H, loose=False)
+
+                # Require the candidate to be NEAR the crop centre (within
+                # ±35 % of icon_size in each axis).  This rejects off-centre
+                # elements that happen to pass the shape filter.
+                near_centre = []
+                cx_crop = cw // 2
+                cy_crop = ch // 2
+                tol = max(20, int(icon_size * 0.35))
+                for c in candidates:
+                    if abs(c["cx"] - cx_crop) <= tol and abs(c["cy"] - cy_crop) <= tol:
+                        near_centre.append(c)
+
+                if near_centre:
                     log.debug(
                         f"find_icon_region_onset: icon detected at {t:.3f}s "
-                        f"(bg_onset={bg_onset:.3f}s, Δ={bg_onset - t:.3f}s)"
+                        f"(bg_onset={bg_onset:.3f}s, Δ={t - bg_onset:+.3f}s)"
                     )
                     return t
 
@@ -756,7 +788,20 @@ def _find_candidates(
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
 
-            # Size filter
+            # ── Correct for morphological inflation ──────────────────────────
+            # MORPH_CLOSE (k=7, iter=4) + dilate (k=7, iter=4) each expand
+            # the mask by (k//2)*iters = 12 px per side → 24 px per side total
+            # → each dimension of the bbox is ~48 px larger than the true icon.
+            # Subtracting this gives an accurate icon size for logo sizing.
+            _MORPH_INFLATE = 48  # px per dimension (24 px per side × both ops)
+            x_raw, y_raw, w_raw, h_raw = x, y, w, h
+            w = max(8, w_raw - _MORPH_INFLATE)
+            h = max(8, h_raw - _MORPH_INFLATE)
+            # Centre stays the same (inflation is symmetric)
+            cx = x_raw + w_raw // 2
+            cy_ = y_raw + h_raw // 2
+
+            # Size filter (on corrected dimensions)
             if not (min_size <= w <= max_size and min_size <= h <= max_size):
                 continue
 
@@ -774,8 +819,7 @@ def _find_candidates(
             if solidity < min_solidity:
                 continue
 
-            cx = x + w // 2
-            cy_ = y + h // 2
+            # cx, cy_ already computed from raw (un-inflated) bbox centre above
 
             # Score components
             squareness = aspect                                  # 0–1, want 1
