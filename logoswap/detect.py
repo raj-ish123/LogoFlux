@@ -854,9 +854,12 @@ def _find_candidates(
 
     min_dim = min(video_w, video_h)
     min_size = min_dim * (0.07 if loose else 0.10)
-    # App icons are at most ~28% of frame width in settled position.
-    # Previous 65% allowed large game-artwork boxes to score highest.
-    max_size = min_dim * (0.35 if loose else 0.28)
+    # Allow icons up to 40 % of frame dimension so that prominent end-card
+    # icons (e.g. Crossword GO!, ~380 px on 1080 p) are not cut.  The
+    # size_score below provides a SOFT penalty for elements above 28 %, so
+    # genuine large icons still score well while noisy game-art regions (low
+    # border contrast, poor squareness) lose to a compact icon.
+    max_size = min_dim * (0.45 if loose else 0.40)
     min_aspect = 0.72 if loose else 0.83
     min_solidity = 0.72 if loose else 0.85
 
@@ -915,16 +918,16 @@ def _find_candidates(
             squareness = aspect                                  # 0–1, want 1
             rel_size = min(w, h) / min_dim                      # 0–1
 
-            # Size score: peak at 18 % of frame (app icons are 10-25 % of frame
-            # dimension in their settled state; game-artwork boxes are 30-65 %
-            # and should score MUCH lower so the icon wins over them).
-            # Asymmetric: under-size penalty is gentle, over-size is steep so
-            # that a 350 px artwork on 1080p gets effectively zero score.
-            if rel_size > 0.22:
-                # Each % over 22 % cuts the score by 10 pts → zero at ~32 %
-                size_score = max(0.0, 0.7 - (rel_size - 0.22) * 7.0)
+            # Size score: peak at 18 % of frame (typical small icon range).
+            # For larger elements (>28 %) a gentle linear penalty applies;
+            # they are not zeroed out so that genuinely prominent icons like
+            # a 380 px Crossword-GO end-card icon can still win on their
+            # overall quality (border contrast, solidity, position).
+            # Very large game-art (>55 % = 594 px) scores 0.
+            if rel_size > 0.28:
+                size_score = max(0.0, 0.60 - (rel_size - 0.28) * 2.2)
             else:
-                size_score = max(0.0, 1.0 - abs(rel_size - 0.17) / 0.13)
+                size_score = max(0.0, 1.0 - abs(rel_size - 0.18) / 0.14)
 
             border_score = _border_contrast(bgr, x, y, w, h)
             interior_var = np.std(gray[y : y + h, x : x + w]) / 255.0

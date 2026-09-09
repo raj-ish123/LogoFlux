@@ -9,6 +9,12 @@ immediately after the scene cut, this module:
   3. Finds settle (TSET) – first frame where the scale has stabilised near 1.0.
   4. Returns the per-frame scale curve for use by render.py.
 
+Exact-tracking mode (track_pop_exact):
+  Instead of a single scale curve from a fixed centre, produces a per-frame
+  (cx, cy, scale) list by chaining template-match predictions: each frame
+  seeds the search for the next, giving sub-pixel accurate position
+  continuity even during fast burst animations.
+
 Fallback: if tracking confidence is too low the well-known fixed pop curve
 measured from this project is used and a warning is logged.
 """
@@ -76,6 +82,8 @@ class PopResult:
     tset: float             # settle timestamp (animation done)
     curve: list[float]      # normalised scale per frame (1.0 = settled size)
     tracking_ok: bool       # False → fixed-curve fallback was used
+    # Exact per-frame tracking (set by track_pop_exact; None = use fixed centre)
+    centers: Optional[list[tuple[int, int]]] = None   # (cx, cy) per frame
 
 
 # ---------------------------------------------------------------------------
@@ -207,8 +215,187 @@ def track_pop(
 
 
 # ---------------------------------------------------------------------------
-# Internals
+# Exact frame-by-frame tracking  (per-frame centre + scale)
 # ---------------------------------------------------------------------------
+
+def track_pop_exact(
+    frames_rgb: list[np.ndarray],
+    frame_times: list[float],
+    region,                         # IconRegion (settled position + size)
+    settled_frame_rgb: np.ndarray,
+) -> PopResult:
+    """
+    Produce a per-frame (cx, cy, scale) track by chaining multi-scale
+    template-match predictions from frame to frame.
+
+    Strategy
+    --------
+    1. Build a grayscale template from the settled icon crop.
+    2. For the FIRST animation frame, search the full ±2× settled-size
+       window to find where the (possibly larger, offset) icon is.
+    3. For EVERY subsequent frame, use the PREVIOUS frame's detected
+       (cx, cy, scale) as the search seed, shrinking the spatial search
+       window to ±20 % of the settled size for speed and accuracy.
+    4. Report exact (cx, cy, scale) per frame.  Frames where confidence
+       falls below 0.40 are filled by linear interpolation from neighbours.
+
+    The resulting ``centers`` list is used by ``generate_sequence`` to
+    position each animation frame at its exact measured location instead of
+    always centering on the settled (cx, cy).  This handles icons that
+    slide, drift, rotate-around-centre, or bounce during their entrance.
+
+    Returns a PopResult with both ``.curve`` and ``.centers`` populated.
+    Falls back to the regular ``track_pop`` result if there are fewer than
+    3 usable frames.
+    """
+    if len(frames_rgb) < 3:
+        return track_pop(frames_rgb, frame_times, region, settled_frame_rgb)
+
+    template_gray = _crop_template(settled_frame_rgb, region)
+    if template_gray is None:
+        return track_pop(frames_rgb, frame_times, region, settled_frame_rgb)
+
+    settled_size = region.size
+    H, W = frames_rgb[0].shape[:2]
+
+    # ── Per-frame chained search ────────────────────────────────────────────
+    # Seed: last known position and scale (start at settled values)
+    prev_cx: float = float(region.cx)
+    prev_cy: float = float(region.cy)
+    prev_scale: float = 1.0
+
+    raw_cx: list[Optional[float]] = []
+    raw_cy: list[Optional[float]] = []
+    raw_scale: list[Optional[float]] = []
+    raw_conf: list[float] = []
+
+    # First frame: wide search (icon might be far from settled position)
+    WIDE_SCALES  = np.linspace(0.50, 2.10, 33)
+    # Subsequent frames: narrow search around previous position
+    NARROW_SCALES = np.linspace(0.80, 1.80, 17)
+
+    for i, frm in enumerate(frames_rgb):
+        gray_f = cv2.cvtColor(frm, cv2.COLOR_RGB2GRAY)
+        scales = WIDE_SCALES if i == 0 else NARROW_SCALES
+
+        # Search window centred on previous detected position
+        if i == 0:
+            win_half = settled_size * 1.6
+        else:
+            win_half = settled_size * 0.5   # tight window for continuity
+
+        sx0 = max(0, int(prev_cx - win_half))
+        sy0 = max(0, int(prev_cy - win_half))
+        sx1 = min(W, int(prev_cx + win_half))
+        sy1 = min(H, int(prev_cy + win_half))
+        search = gray_f[sy0:sy1, sx0:sx1]
+
+        best_score = -1.0
+        best_cx = prev_cx
+        best_cy = prev_cy
+        best_sz  = prev_scale * settled_size
+
+        for s in scales:
+            tp = int(round(settled_size * s))
+            if tp < 20 or tp >= search.shape[0] or tp >= search.shape[1]:
+                continue
+            try:
+                tmpl = cv2.resize(template_gray, (tp, tp))
+            except Exception:
+                continue
+            res = cv2.matchTemplate(search, tmpl, cv2.TM_CCOEFF_NORMED)
+            _, mv, _, ml = cv2.minMaxLoc(res)
+            if mv > best_score:
+                best_score = mv
+                best_cx = sx0 + ml[0] + tp / 2.0
+                best_cy = sy0 + ml[1] + tp / 2.0
+                best_sz = float(tp)
+
+        if best_score >= 0.35:
+            raw_cx.append(best_cx)
+            raw_cy.append(best_cy)
+            raw_scale.append(best_sz / settled_size)
+            raw_conf.append(best_score)
+            prev_cx = best_cx
+            prev_cy = best_cy
+            prev_scale = best_sz / settled_size
+        else:
+            raw_cx.append(None)
+            raw_cy.append(None)
+            raw_scale.append(None)
+            raw_conf.append(0.0)
+            # Don't update prev — carry forward last good
+
+    # ── Interpolate gaps ────────────────────────────────────────────────────
+    def _interp_none(vals: list, fallback: float) -> list[float]:
+        out: list[float] = []
+        for i, v in enumerate(vals):
+            if v is not None:
+                out.append(float(v))
+            else:
+                # Find nearest non-None neighbours
+                lo = next((j for j in range(i - 1, -1, -1) if vals[j] is not None), None)
+                hi = next((j for j in range(i + 1, len(vals)) if vals[j] is not None), None)
+                if lo is None and hi is None:
+                    out.append(fallback)
+                elif lo is None:
+                    out.append(float(vals[hi]))
+                elif hi is None:
+                    out.append(float(vals[lo]))
+                else:
+                    t = (i - lo) / (hi - lo)
+                    out.append(float(vals[lo]) * (1 - t) + float(vals[hi]) * t)
+        return out
+
+    cx_list  = _interp_none(raw_cx,    float(region.cx))
+    cy_list  = _interp_none(raw_cy,    float(region.cy))
+    sc_list  = _interp_none(raw_scale, 1.0)
+
+    # ── Find onset + settle ────────────────────────────────────────────────
+    conf_arr  = np.array(raw_conf, dtype=np.float64)
+    scale_arr = np.array(sc_list, dtype=np.float64)
+
+    onset_idx = 0
+    for i in range(len(conf_arr)):
+        if np.mean(conf_arr[max(0, i):min(len(conf_arr), i + 3)]) >= 0.40:
+            onset_idx = i
+            break
+
+    settle_idx = len(frames_rgb) - 1
+    for i in range(onset_idx, len(scale_arr) - 3):
+        window = scale_arr[i:i + 4]
+        if np.all(np.abs(window - 1.0) < 0.08):
+            settle_idx = i + 3
+            break
+
+    dt = _frame_dt(frame_times)
+    ts   = max(frame_times[0], frame_times[onset_idx]  - dt * 2)
+    tset = min(frame_times[-1], frame_times[settle_idx] + dt)
+
+    curve = [max(0.50, min(2.10, s)) for s in sc_list[onset_idx:settle_idx + 1]]
+    if not curve:
+        curve = [1.0]
+    curve[-1] = 1.0
+
+    centers_list = [
+        (int(round(cx_list[i])), int(round(cy_list[i])))
+        for i in range(onset_idx, settle_idx + 1)
+    ]
+
+    ok = float(np.mean(conf_arr[onset_idx:settle_idx + 1])) >= 0.40
+    if not ok:
+        log.warning("Exact tracking low confidence – using fixed curve with measured timing.")
+        curve = _scale_fixed_curve(ts, tset, dt)
+        centers_list = [(region.cx, region.cy)] * len(curve)
+
+    log.info(
+        f"track_pop_exact: onset={ts:.3f}s settle={tset:.3f}s "
+        f"frames={len(curve)} exact_centres={ok}"
+    )
+    return PopResult(ts=ts, tset=tset, curve=curve, tracking_ok=ok, centers=centers_list)
+
+
+
 
 def _crop_template(
     frame_rgb: np.ndarray, region

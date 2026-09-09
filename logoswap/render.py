@@ -204,12 +204,18 @@ def generate_sequence(
     video_h: int,
     curve: list[float],
     out_dir: Path,
+    centers: "list[tuple[int,int]] | None" = None,
 ) -> Path:
     """
     Write one transparent PNG per curve frame into out_dir.
 
     Each frame is a video_w × video_h RGBA canvas with the logo scaled by
-    curve[f] and centred on (cx, cy).  The sequence is numbered f0000.png …
+    curve[f] and centred on (cx, cy) — or on centers[f] when per-frame
+    exact tracking is available.  The sequence is numbered f0000.png …
+
+    ``centers`` : optional list of (cx, cy) per frame from track_pop_exact.
+    When provided its length must equal len(curve); the logo is placed at
+    the per-frame measured position rather than the fixed settled centre.
 
     Returns out_dir.
     """
@@ -219,9 +225,15 @@ def generate_sequence(
         px_size = max(1, round(logo_size * scale))
         scaled = logo_rgba.resize((px_size, px_size), Image.LANCZOS)
 
+        # Use per-frame centre if available, fall back to settled centre.
+        if centers is not None and f < len(centers):
+            fcx, fcy = centers[f]
+        else:
+            fcx, fcy = cx, cy
+
         canvas = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))
-        paste_x = round(cx - px_size / 2)
-        paste_y = round(cy - px_size / 2)
+        paste_x = round(fcx - px_size / 2)
+        paste_y = round(fcy - px_size / 2)
         canvas.paste(scaled, (paste_x, paste_y), scaled)
         canvas.save(str(out_dir / f"f{f:04d}.png"))
 

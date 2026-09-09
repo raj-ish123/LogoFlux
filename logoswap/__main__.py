@@ -461,7 +461,7 @@ def _process_one(
         get_settled_frame, detect_icon, find_icon_onset,
         find_icon_region_onset, find_icon_end, detect_corner_logo, measure_endcard_zoom,
     )
-    from .track import track_pop, FIXED_CURVE, PopResult
+    from .track import track_pop, track_pop_exact, FIXED_CURVE, PopResult
     from .logo import build_rounded_logo, save_rounded_logo
     from .render import (
         generate_sequence, generate_zoom_sequence,
@@ -737,13 +737,16 @@ def _process_one(
                     tr_frames = []
                     tr_times = [onset_time]
 
-                pop = track_pop(tr_frames, tr_times, region, settled_frame)
+                # Use exact frame-by-frame tracking (per-frame cx, cy, scale)
+                # so the replacement mirrors the original animation precisely.
+                pop = track_pop_exact(tr_frames, tr_times, region, settled_frame)
                 if args.settle is not None:
                     pop = PopResult(
                         ts=onset_time, tset=float(args.settle),
                         curve=pop.curve, tracking_ok=pop.tracking_ok,
+                        centers=pop.centers,
                     )
-                status = "OK" if pop.tracking_ok else "FALLBACK"
+                status = "EXACT" if pop.centers else ("OK" if pop.tracking_ok else "FALLBACK")
                 log.info(
                     f"[{name}] Pop tracking {status}: "
                     f"TS={pop.ts:.3f}  TSET={pop.tset:.3f}  "
@@ -755,6 +758,7 @@ def _process_one(
                     logo_rgba, logo_size,
                     region.cx, region.cy,
                     vw, vh, pop.curve, seq_dir,
+                    centers=pop.centers,
                 )
                 log.info(f"[{name}] Rendering (animated, {len(pop.curve)} frames) → {out_name}")
                 render_video(
