@@ -629,7 +629,12 @@ def find_icon_region_onset(
         tmp = Path(_tmp)
 
         step = 0.1   # 100 ms between probes – fast enough, cheap enough
-        t_start = max(0.0, bg_onset - look_back)
+        # The icon cannot appear before the end-card background transitions in,
+        # so scan starts at bg_onset (not look_back seconds earlier).
+        # look_back is kept as a parameter for backwards compatibility but is
+        # NOT used to start the scan earlier (that was causing gameplay frames
+        # to be mistaken for the icon during transition animations).
+        t_start = bg_onset
         t_end   = bg_onset + forward_look   # scan well past bg_onset
 
         # Crop a box ±70 % of icon_size around the expected centre.
