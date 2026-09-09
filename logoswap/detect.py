@@ -263,9 +263,12 @@ def detect_corner_logo(
             for name, (x0, y0, x1, y1) in corner_boxes.items():
                 roi = g[y0:y1, x0:x1]
                 best = (-1.0, None)
-                for s in np.linspace(0.035, 0.22, 32):
+                # Corner watermarks are SMALL (< 10 % of frame width = ~108 px
+                # for 1080p).  The previous range up to 22 % (237 px) was
+                # matching large game-branding art and top-banner logos.
+                for s in np.linspace(0.03, 0.10, 16):
                     tp = int(W * s)
-                    if tp < 24 or tp >= roi.shape[0] or tp >= roi.shape[1]:
+                    if tp < 20 or tp >= roi.shape[0] or tp >= roi.shape[1]:
                         continue
                     tmpl = cv2.resize(tmpl_full, (tp, tp))
                     res = cv2.matchTemplate(roi, tmpl, cv2.TM_CCOEFF_NORMED)
@@ -273,11 +276,16 @@ def detect_corner_logo(
                     if mv > best[0]:
                         best = (mv, (x0 + ml[0], y0 + ml[1], tp))
                 if best[0] >= min_score and best[1] is not None:
+                    # The matched watermark must be SMALLER than the end-card
+                    # icon (a genuine corner watermark is a scaled-down version
+                    # of the brand).  Reject if it's ≥ 70 % of icon size.
+                    tp_found = best[1][2]
+                    if tp_found >= region.size * 0.70:
+                        continue
                     hits[name].append((best[0], *best[1]))
 
     # Pick the corner with the most consistent strong matches.
-    # Require at least 2/3 of samples to agree (tightened from n_samples//2)
-    # to reduce false-positive template matches on game tiles.
+    # Require at least 2/3 of samples to agree.
     min_hits = max(3, n_samples * 2 // 3)
     best_corner, best_list = None, []
     for name, lst in hits.items():
@@ -584,6 +592,81 @@ def find_icon_onset(
         return t_hi   # earliest confirmed end-card presence
 
 
+def find_icon_end(
+    video_path: str | Path,
+    cx: int,
+    cy: int,
+    icon_size: int,
+    onset_time: float,
+    duration: float,
+    diff_thresh: float = 0.10,
+) -> Optional[float]:
+    """
+    Detect when the end-card icon DISAPPEARS (fade-out, cut, or wipe) so the
+    replacement overlay can be bounded in time.
+
+    Scans forward from ``onset_time`` using the settled (last-frame) icon crop
+    as a reference.  Returns the timestamp of the last frame that still
+    matches the settled icon (within ``diff_thresh``), or None if the icon
+    stays visible until the very end of the video (most common case – caller
+    should not pass end_time and let the overlay run to EOS).
+
+    Parameters
+    ----------
+    onset_time   : the detected end-card onset (overlay start)
+    duration     : total video duration in seconds
+    diff_thresh  : icon-region mean abs diff that signals the icon is gone
+    """
+    import logging
+    log = logging.getLogger("logoswap.detect")
+    from .probe import extract_single_frame, load_frame_rgb
+
+    with tempfile.TemporaryDirectory(prefix="logoswap_ie_") as _tmp:
+        tmp = Path(_tmp)
+
+        # Extract the settled (reference) icon crop from the last frame.
+        ref_path = tmp / "ref.png"
+        extract_single_frame(video_path, max(0.0, duration - 0.2), ref_path)
+        ref_frame = load_frame_rgb(ref_path)
+        H, W = ref_frame.shape[:2]
+
+        half = max(16, icon_size // 2)
+        y0 = max(0, cy - half); y1 = min(H, cy + half)
+        x0 = max(0, cx - half); x1 = min(W, cx + half)
+        ref_crop = ref_frame[y0:y1, x0:x1].astype(np.float32)
+
+        def _icon_diff(t: float) -> float:
+            fp = tmp / "chk.png"
+            try:
+                extract_single_frame(video_path, t, fp)
+                f = load_frame_rgb(fp)
+                return float(np.abs(f[y0:y1, x0:x1].astype(np.float32) - ref_crop).mean()) / 255.0
+            except Exception:
+                return 1.0
+
+        # Check 0.3s before end: if the icon is still there the overlay runs
+        # to EOS and we return None (no bounded end_time needed).
+        if _icon_diff(duration - 0.3) < diff_thresh:
+            return None
+
+        # Binary search for the last frame where the icon is present.
+        t_lo = onset_time
+        t_hi = duration - 0.3
+        for _ in range(8):   # 8 iters → precision ~(duration - onset) / 256
+            t_mid = (t_lo + t_hi) / 2.0
+            if _icon_diff(t_mid) < diff_thresh:
+                t_lo = t_mid   # icon still present → search later
+            else:
+                t_hi = t_mid   # icon gone → search earlier
+
+        end_time = t_lo + 0.1   # add small buffer past last confirmed presence
+        log.info(
+            f"find_icon_end: end-card icon gone at ~{end_time:.3f}s "
+            f"(video ends at {duration:.3f}s; adding end_time bound)"
+        )
+        return min(end_time, duration)
+
+
 def find_icon_region_onset(
     video_path: str | Path,
     cx: int,
@@ -770,8 +853,10 @@ def _find_candidates(
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
     min_dim = min(video_w, video_h)
-    min_size = min_dim * (0.08 if loose else 0.12)
-    max_size = min_dim * (0.70 if loose else 0.65)
+    min_size = min_dim * (0.07 if loose else 0.10)
+    # App icons are at most ~28% of frame width in settled position.
+    # Previous 65% allowed large game-artwork boxes to score highest.
+    max_size = min_dim * (0.35 if loose else 0.28)
     min_aspect = 0.72 if loose else 0.83
     min_solidity = 0.72 if loose else 0.85
 
@@ -826,20 +911,44 @@ def _find_candidates(
 
             # cx, cy_ already computed from raw (un-inflated) bbox centre above
 
-            # Score components
+            # ── Score components ──────────────────────────────────────────────
             squareness = aspect                                  # 0–1, want 1
             rel_size = min(w, h) / min_dim                      # 0–1
-            size_score = max(0.0, 1.0 - abs(rel_size - 0.30) / 0.28)
+
+            # Size score: peak at 18 % of frame (app icons are 10-25 % of frame
+            # dimension in their settled state; game-artwork boxes are 30-65 %
+            # and should score MUCH lower so the icon wins over them).
+            # Asymmetric: under-size penalty is gentle, over-size is steep so
+            # that a 350 px artwork on 1080p gets effectively zero score.
+            if rel_size > 0.22:
+                # Each % over 22 % cuts the score by 10 pts → zero at ~32 %
+                size_score = max(0.0, 0.7 - (rel_size - 0.22) * 7.0)
+            else:
+                size_score = max(0.0, 1.0 - abs(rel_size - 0.17) / 0.13)
+
             border_score = _border_contrast(bgr, x, y, w, h)
             interior_var = np.std(gray[y : y + h, x : x + w]) / 255.0
             int_score = min(1.0, interior_var * 3.0)
 
+            # ── Vertical position bonus ────────────────────────────────────────
+            # Game-ad end-cards put the app icon in the LOWER 60 % of the frame.
+            # Elements in the top 25 % (game title, score, hooks) receive a
+            # penalty so they lose to a genuine bottom-area icon.
+            vert_ratio = cy_ / video_h   # 0 = top, 1 = bottom
+            if vert_ratio < 0.25:
+                pos_score = max(0.0, vert_ratio / 0.25 - 0.5)   # 0 at top, 0.5 at 25 %
+            elif vert_ratio < 0.45:
+                pos_score = 0.5 + (vert_ratio - 0.25) / 0.20 * 0.5  # 0.5→1.0
+            else:
+                pos_score = 1.0   # lower 55 % of frame: full bonus
+
             score = (
                 squareness * 2.0
-                + size_score * 1.5
+                + size_score * 2.0      # raised weight – size matters most
                 + border_score * 1.5
                 + int_score * 1.0
                 + solidity * 1.0
+                + pos_score * 1.5       # new: vertical position preference
             )
 
             candidates.append(

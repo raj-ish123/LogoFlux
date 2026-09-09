@@ -653,9 +653,9 @@ h2 {
           <div class="field full-col">
             <label>Size margin (coverage over old icon)</label>
             <div class="range-wrap">
-              <input type="range" id="margin-range" min="0" max="0.25" step="0.01" value="0.16"
+              <input type="range" id="margin-range" min="0" max="0.25" step="0.01" value="0.08"
                 oninput="document.getElementById('margin-val').textContent=(this.value*100).toFixed(0)+'%'">
-              <span class="range-val" id="margin-val">16%</span>
+              <span class="range-val" id="margin-val">8%</span>
             </div>
             <span class="field-hint">How much larger the replacement logo is vs the detected icon</span>
           </div>
@@ -717,7 +717,7 @@ h2 {
           <div class="big-icon">📤</div>
           Results appear here after you run a job.
         </div>
-        <div id="progress-section" style="display:none">
+        <div id="video-grid-wrap" style="display:none">
           <div class="video-grid" id="video-grid"></div>
         </div>
         <div id="results-section" style="display:none">
@@ -1022,7 +1022,7 @@ async function runJob() {
   S.cards = {};
   ['video-grid','log-body','results-grid'].forEach(id => { document.getElementById(id).innerHTML = ''; });
   document.getElementById('output-empty').style.display = 'none';
-  document.getElementById('progress-section').style.display = '';
+  document.getElementById('video-grid-wrap').style.display = '';
   document.getElementById('results-section').style.display = 'none';
 
   const btn = document.getElementById('run-btn');
@@ -1176,6 +1176,13 @@ function showResults(results) {
   document.getElementById('output-empty').style.display = 'none';
   sec.style.display = '';
   grid.innerHTML = '';
+
+  // ── Hide the processing-queue section once jobs are done ──────────────────
+  // The user only needs to see the output grid at this point, not the per-video
+  // progress tiles.  We slide the video-grid wrapper out of view.
+  const videoGridWrap = document.getElementById('video-grid-wrap');
+  if (videoGridWrap) videoGridWrap.style.display = 'none';
+
   if (!results || !results.length) {
     grid.innerHTML = '<div class="empty-state"><div class="big-icon">😶</div>No results.</div>';
     return;

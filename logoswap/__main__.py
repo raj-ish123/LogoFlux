@@ -459,7 +459,7 @@ def _process_one(
     from .probe import probe_video, extract_frames_at_rate, load_frame_rgb
     from .detect import (
         get_settled_frame, detect_icon, find_icon_onset,
-        find_icon_region_onset, detect_corner_logo, measure_endcard_zoom,
+        find_icon_region_onset, find_icon_end, detect_corner_logo, measure_endcard_zoom,
     )
     from .track import track_pop, FIXED_CURVE, PopResult
     from .logo import build_rounded_logo, save_rounded_logo
@@ -560,8 +560,6 @@ def _process_one(
 
             # -------------------------------------------------------------- #
             # 4b. Zoom-out end-card: logo appears huge and shrinks to settled.
-            #     Measure its per-frame size/centre so the replacement tracks
-            #     it exactly (a plain scale-pop leaves the original exposed).
             # -------------------------------------------------------------- #
             zoom = None
             if args.start is None and args.settle is None:
@@ -573,6 +571,20 @@ def _process_one(
             # The logo's true entrance (huge frame) precedes the background
             # onset; use it so the replacement covers the whole zoom.
             entrance_time = zoom.times[0] if zoom is not None else onset_time
+
+            # -------------------------------------------------------------- #
+            # 4b2. Detect when the end-card icon DISAPPEARS (fade-out / cut)
+            #      so the replacement overlay stops rather than floating on
+            #      a blank or next-scene frame.
+            # -------------------------------------------------------------- #
+            end_time: Optional[float] = find_icon_end(
+                video_path,
+                region.cx, region.cy, region.size,
+                onset_time=entrance_time,
+                duration=duration,
+            )
+            if end_time is not None:
+                log.info(f"[{name}] End-card icon disappears at {end_time:.3f}s → overlay bounded")
 
             # -------------------------------------------------------------- #
             # 4c. Hybrid: a small same-brand CORNER watermark present during
@@ -674,6 +686,7 @@ def _process_one(
                     seq_dir, fps_frac, has_audio,
                     onset_time=entrance_time,
                     corner=corner_overlay,
+                    end_time=end_time,
                 )
             elif is_slide:
                 # -- Slide-from-top render ─────────────────────────────────
@@ -752,6 +765,7 @@ def _process_one(
                     seq_dir, fps_frac, has_audio,
                     onset_time=onset_time,
                     corner=corner_overlay,
+                    end_time=end_time,
                 )
             else:
                 # -- Static render: logo appears instantly at onset ─────────
@@ -762,6 +776,7 @@ def _process_one(
                     region.cx, region.cy,
                     onset_time, has_audio,
                     corner=corner_overlay,
+                    end_time=end_time,
                 )
 
             size_kb = output_path.stat().st_size // 1024

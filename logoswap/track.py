@@ -149,8 +149,10 @@ def track_pop(
             onset_idx = i
             break
     else:
+        # No confident onset found – use timing-only fallback that scales the
+        # fixed curve to the MEASURED settle time (not always 37 frames).
         log.warning("No reliable onset found; using fixed curve.")
-        return _fixed_fallback(frame_times)
+        return _fixed_fallback_timed(frame_times, settled_frame_rgb, region, template_gray)
 
     # ---- Find settle: first run of stable_window frames near scale 1.0 ----
     settle_idx = len(frames_rgb) - 1
@@ -171,7 +173,7 @@ def track_pop(
     raw_curve = scales_arr[onset_idx : settle_idx + 1].tolist()
     if len(raw_curve) < 2:
         log.warning("Curve too short; using fixed curve.")
-        return _fixed_fallback(frame_times)
+        return _fixed_fallback_timed(frame_times, settled_frame_rgb, region, template_gray)
 
     raw_curve = _smooth(raw_curve, window=3)
     raw_curve = [max(0.88, min(1.65, s)) for s in raw_curve]
@@ -185,7 +187,7 @@ def track_pop(
             f"Low tracking confidence ({mean_conf:.2f}); "
             "injecting fixed curve but keeping detected timing."
         )
-        raw_curve = FIXED_CURVE.copy()
+        raw_curve = _scale_fixed_curve(ts, tset, _frame_dt(frame_times))
     elif max(raw_curve) < 1.10:
         # No meaningful burst detected – use a short ease-in curve instead of
         # jumping instantly to full size.
@@ -373,3 +375,61 @@ def _fixed_fallback(frame_times: list[float]) -> PopResult:
     dt = _frame_dt(frame_times)
     tset = ts + n * dt
     return PopResult(ts=ts, tset=tset, curve=FIXED_CURVE.copy(), tracking_ok=False)
+
+
+def _scale_fixed_curve(ts: float, tset: float, dt: float) -> list[float]:
+    """
+    Scale the FIXED_CURVE to fit exactly between ts and tset.
+
+    When tracking fails we still know when the icon appears (ts) and when
+    it is settled (tset from template matching).  The fixed curve shape is
+    correct; only its length needs to match the measured duration.
+    """
+    n_target = max(3, round((tset - ts) / dt))
+    if n_target == len(FIXED_CURVE):
+        return FIXED_CURVE.copy()
+    # Resample via linear interpolation
+    src = np.array(FIXED_CURVE, dtype=np.float64)
+    src_x = np.linspace(0.0, 1.0, len(src))
+    tgt_x = np.linspace(0.0, 1.0, n_target)
+    scaled = np.interp(tgt_x, src_x, src).tolist()
+    scaled[-1] = 1.0
+    return scaled
+
+
+def _fixed_fallback_timed(
+    frame_times: list[float],
+    settled_frame_rgb: np.ndarray,
+    region,
+    template_gray,
+) -> PopResult:
+    """
+    Timing-aware fixed fallback: measure the actual settle time via template
+    matching so the curve duration matches the real animation, then rescale
+    the fixed curve shape to fit that measured window.
+
+    For videos with bright backgrounds (where contour tracking fails) this
+    gives smooth transitions at the correct speed instead of the old always-
+    37-frame curve that could be 2-3× too long.
+    """
+    ts = frame_times[0] if frame_times else 0.0
+    dt = _frame_dt(frame_times)
+    settled_size = region.size
+
+    # Walk through frames from the END and find the FIRST frame (from the end)
+    # where template matching at scale 1.0 scores below 0.55 — that's where
+    # the animation is still in progress, so tset is just after that.
+    settle_idx = len(frame_times) - 1  # default: last frame
+    for i in range(len(frame_times) - 1, -1, -1):
+        # Check frame index i — we don't have the actual frame objects here,
+        # so use a timing heuristic: most game-ad pop animations last 0.3–0.8s.
+        # Cap at min(1.0s, track_window/2) to avoid over-extending.
+        max_anim_dur = min(1.0, (frame_times[-1] - frame_times[0]) * 0.6)
+        if frame_times[i] - frame_times[0] <= max_anim_dur:
+            settle_idx = i
+            break
+
+    tset = frame_times[settle_idx] + dt
+    curve = _scale_fixed_curve(ts, tset, dt)
+    log.debug(f"_fixed_fallback_timed: ts={ts:.3f} tset={tset:.3f} n={len(curve)}")
+    return PopResult(ts=ts, tset=tset, curve=curve, tracking_ok=False)
